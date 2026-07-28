@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block content %}
+<h3 class="mb-3">Alta de empleado</h3>
+
+{% if not puestos %}
+<div class="alert alert-warning">
+  Antes de dar de alta personal, registra al menos una <a href="{{ url_for('obras') }}">obra</a>
+  y un <a href="{{ url_for('catalogo') }}">puesto en el catalogo</a>.
+</div>
+{% endif %}
+
+<form method="post" class="card p-4">
+  <h6 class="text-navy">Datos del empleado</h6>
+  <div class="row g-3 mb-2">
+    <div class="col-md-2"><label class="form-label">Ref</label>
+      <input name="ref" class="form-control" value="{{ datos.get('ref','') }}"></div>
+    <div class="col-md-4"><label class="form-label">Nombre(s) *</label>
+      <input name="nombre" class="form-control" value="{{ datos.get('nombre','') }}" required></div>
+    <div class="col-md-3"><label class="form-label">Primer apellido *</label>
+      <input name="primer_apellido" class="form-control" value="{{ datos.get('primer_apellido','') }}" required></div>
+    <div class="col-md-3"><label class="form-label">Segundo apellido</label>
+      <input name="segundo_apellido" class="form-control" value="{{ datos.get('segundo_apellido','') }}"></div>
+  </div>
+
+  <div class="row g-3 mb-2">
+    <div class="col-md-3"><label class="form-label">CURP *</label>
+      <input name="curp" class="form-control text-uppercase" maxlength="18" value="{{ datos.get('curp','') }}" required></div>
+    <div class="col-md-3"><label class="form-label">RFC</label>
+      <input name="rfc" class="form-control text-uppercase" maxlength="13" value="{{ datos.get('rfc','') }}"></div>
+    <div class="col-md-2"><label class="form-label">CP fiscal</label>
+      <input name="cp_fiscal" class="form-control" maxlength="5" value="{{ datos.get('cp_fiscal','') }}"></div>
+    <div class="col-md-2"><label class="form-label">Sexo</label>
+      <select name="sexo" class="form-select">
+        <option value="">-</option>
+        <option value="H" {{ 'selected' if datos.get('sexo')=='H' }}>Hombre</option>
+        <option value="M" {{ 'selected' if datos.get('sexo')=='M' }}>Mujer</option>
+      </select></div>
+    <div class="col-md-2"><label class="form-label">Fecha nacimiento</label>
+      <input name="fecha_nacimiento" type="date" class="form-control" value="{{ datos.get('fecha_nacimiento','') }}"></div>
+  </div>
+
+  <div class="row g-3 mb-2">
+    <div class="col-md-3"><label class="form-label">NSS</label>
+      <input name="nss" class="form-control" maxlength="11" value="{{ datos.get('nss','') }}">
+      <div class="form-text">11 digitos. Se valida el digito verificador.</div></div>
+    <div class="col-md-5"><label class="form-label">Puesto (obra + categoria) *</label>
+      <select name="puesto_id" class="form-select" required>
+        <option value="">Selecciona...</option>
+        {% for p in puestos %}
+        <option value="{{ p.id }}" {{ 'selected' if datos.get('puesto_id')==(p.id|string) }}>
+          {{ p.obra }} - {{ p.puesto }} (${{ '%.0f'|format(p.sueldo_semanal) }}/sem)
+        </option>
+        {% endfor %}
+      </select></div>
+    <div class="col-md-2"><label class="form-label">Fecha de alta *</label>
+      <input name="fecha_alta" type="date" class="form-control" value="{{ datos.get('fecha_alta','') }}" required></div>
+    <div class="col-md-2"><label class="form-label">Salario alta IMSS</label>
+      <input name="importe_alta_imss" type="number" step="0.01" class="form-control" value="{{ datos.get('importe_alta_imss','') }}"></div>
+  </div>
+
+  <div class="row g-3 mb-2">
+    <div class="col-md-3"><label class="form-label">Descuento INFONAVIT (semanal)</label>
+      <input name="infonavit_monto" type="number" step="0.01" class="form-control" value="{{ datos.get('infonavit_monto','0') }}"></div>
+  </div>
+
+  <div class="border rounded p-3 my-2 bg-light">
+    <div class="form-check">
+      <input class="form-check-input" type="checkbox" name="exime_docs" id="exime" {{ 'checked' if datos.get('exime_docs') }}>
+      <label class="form-check-label" for="exime">Eximir documentos (INE / NSS) con autorizacion de un tercero</label>
+    </div>
+    <input name="autoriza_tercero" class="form-control mt-2" placeholder="Nombre de quien autoriza (obligatorio si eximes)" value="{{ datos.get('autoriza_tercero','') }}">
+  </div>
+
+  <h6 class="text-navy mt-3">Cuenta bancaria (opcional)</h6>
+  <div class="row g-3 mb-3">
+    <div class="col-md-4"><label class="form-label">Institucion</label>
+      <input name="cta_institucion" class="form-control" value="{{ datos.get('cta_institucion','') }}"></div>
+    <div class="col-md-4"><label class="form-label">Tipo de cuenta</label>
+      <select name="cta_tipo" class="form-select">
+        <option value="">-</option>
+        {% for t in tipos %}<option {{ 'selected' if datos.get('cta_tipo')==t }}>{{ t }}</option>{% endfor %}
+      </select></div>
+    <div class="col-md-4"><label class="form-label">Numero</label>
+      <input name="cta_numero" class="form-control" value="{{ datos.get('cta_numero','') }}">
+      <div class="form-text">No se permiten cuentas duplicadas.</div></div>
+  </div>
+
+  <div class="d-flex gap-2">
+    <button class="btn btn-primary">Guardar empleado</button>
+    <a class="btn btn-outline-secondary" href="{{ url_for('personal') }}">Cancelar</a>
+  </div>
+</form>
+{% endblock %}

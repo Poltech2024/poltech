@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block content %}
+<h3 class="mb-3">Inicio</h3>
+{% if usa_default %}
+<div class="alert alert-warning py-2">
+  Estas usando la contrasena por defecto del administrador. Por seguridad,
+  <a href="{{ url_for('cambiar_password') }}">cambiala aqui</a> o define <b>ADMIN_PASSWORD</b> en Render.
+</div>
+{% endif %}
+<div class="row g-3 mb-4">
+  <div class="col-6 col-md-3"><div class="card card-stat text-center p-3"><div class="num">{{ stats.empleados }}</div><div class="text-muted small">Empleados activos</div></div></div>
+  <div class="col-6 col-md-3"><div class="card card-stat text-center p-3"><div class="num">{{ stats.obras }}</div><div class="text-muted small">Obras</div></div></div>
+  <div class="col-6 col-md-3"><div class="card card-stat text-center p-3"><div class="num">{{ stats.puestos }}</div><div class="text-muted small">Puestos en catalogo</div></div></div>
+  <div class="col-6 col-md-3"><div class="card card-stat text-center p-3"><div class="num">{{ stats.cuentas }}</div><div class="text-muted small">Cuentas bancarias</div></div></div>
+</div>
+<div class="card p-3">
+  <h6 class="text-navy">Para empezar (en orden):</h6>
+  <ol class="mb-0 small">
+    <li>Registra tus <a href="{{ url_for('obras') }}">Obras</a>.</li>
+    <li>Crea el <a href="{{ url_for('catalogo') }}">Catalogo de sueldos</a> (puestos con sueldo y viaticos por obra).</li>
+    <li>Da de alta al <a href="{{ url_for('personal') }}">Personal</a> con su cuenta bancaria.</li>
+  </ol>
+</div>
+{% endblock %}

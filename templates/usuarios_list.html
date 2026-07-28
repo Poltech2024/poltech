@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block content %}
+<h3 class="mb-3">Usuarios y accesos</h3>
+<p class="text-muted small">Aqui el administrador crea las cuentas del personal y les asigna su rol (y obra, si aplica).</p>
+
+<div class="card p-3 mb-4">
+  <h6 class="text-navy">Crear usuario</h6>
+  <form method="post" class="row g-2">
+    <div class="col-md-2"><input name="username" class="form-control" placeholder="Usuario" required></div>
+    <div class="col-md-3"><input name="nombre" class="form-control" placeholder="Nombre completo" required></div>
+    <div class="col-md-2"><input name="password" type="text" class="form-control" placeholder="Contrasena" required></div>
+    <div class="col-md-2">
+      <select name="role" class="form-select" required>
+        <option value="">Rol...</option>
+        {% for key, val in roles.items() %}<option value="{{ key }}">{{ val[0] }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="col-md-2">
+      <select name="obra_id" class="form-select">
+        <option value="">Obra (opcional)</option>
+        {% for o in obras %}<option value="{{ o.id }}">{{ o.nombre }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="col-md-1"><button class="btn btn-primary w-100">+</button></div>
+  </form>
+</div>
+
+<div class="card">
+  <div class="table-responsive">
+  <table class="table table-sm align-middle mb-0">
+    <thead><tr><th>Usuario</th><th>Nombre</th><th>Rol y obra</th><th>Contrasena</th><th></th></tr></thead>
+    <tbody>
+      {% for u in usuarios %}
+      <tr>
+        <td><b>{{ u.username }}</b></td>
+        <td>{{ u.nombre }}</td>
+        <td>
+          <form method="post" action="{{ url_for('usuario_rol', uid=u.id) }}" class="d-flex gap-1">
+            <select name="role" class="form-select form-select-sm" style="width:auto">
+              {% for key, val in roles.items() %}
+              <option value="{{ key }}" {{ 'selected' if u.role==key }}>{{ val[0] }}</option>
+              {% endfor %}
+            </select>
+            <select name="obra_id" class="form-select form-select-sm" style="width:auto">
+              <option value="">— sin obra —</option>
+              {% for o in obras %}<option value="{{ o.id }}" {{ 'selected' if u.obra_id==o.id }}>{{ o.nombre }}</option>{% endfor %}
+            </select>
+            <button class="btn btn-sm btn-outline-primary">Guardar</button>
+          </form>
+        </td>
+        <td>
+          <form method="post" action="{{ url_for('usuario_password', uid=u.id) }}" class="d-flex gap-1">
+            <input name="nueva" class="form-control form-control-sm" style="width:130px" placeholder="Nueva">
+            <button class="btn btn-sm btn-outline-secondary">Resetear</button>
+          </form>
+        </td>
+        <td>
+          {% if u.id != current_user.id %}
+          <form method="post" action="{{ url_for('usuario_eliminar', uid=u.id) }}"
+                onsubmit="return confirm('Eliminar a {{ u.username }}?')">
+            <button class="btn btn-sm btn-outline-danger">Eliminar</button>
+          </form>
+          {% else %}<span class="badge bg-secondary">Tú</span>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endblock %}

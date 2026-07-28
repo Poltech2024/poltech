@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block content %}
+<h3 class="mb-3">Cuentas bancarias</h3>
+<p class="text-muted small">Las cuentas se registran al dar de alta al empleado. No se permiten numeros duplicados.</p>
+<div class="card">
+  <table class="table table-sm mb-0">
+    <thead><tr><th>Empleado</th><th>Institucion</th><th>Tipo</th><th>Numero</th></tr></thead>
+    <tbody>
+      {% for c in cuentas %}
+      <tr><td>{{ c.nombre }} {{ c.primer_apellido }} {{ c.segundo_apellido or '' }}</td>
+        <td>{{ c.institucion }}</td><td>{{ c.tipo_cuenta }}</td><td>{{ c.numero }}</td></tr>
+      {% else %}
+      <tr><td colspan="4" class="text-center text-muted py-3">Aun no hay cuentas registradas.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

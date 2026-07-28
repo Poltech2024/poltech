@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block content %}
+<h3 class="mb-3">Catalogo de sueldos por obra</h3>
+{% if current_user.rank >= GERENTE_RANK %}
+<div class="card p-3 mb-4">
+  <h6 class="text-navy">Agregar puesto</h6>
+  {% if obras %}
+  <form method="post" class="row g-2">
+    <div class="col-md-3">
+      <select name="obra_id" class="form-select" required>
+        <option value="">Obra...</option>
+        {% for o in obras %}<option value="{{ o.id }}">{{ o.nombre }} ({{ o.estado }})</option>{% endfor %}
+      </select>
+    </div>
+    <div class="col-md-3"><input name="nombre" class="form-control" placeholder="Puesto (ej. Oficial Montador)" required></div>
+    <div class="col-md-2"><input name="sueldo_semanal" type="number" step="0.01" class="form-control" placeholder="Sueldo sem." required></div>
+    <div class="col-md-2"><input name="viaticos_semanales" type="number" step="0.01" class="form-control" placeholder="Viaticos sem." value="0"></div>
+    <div class="col-md-2"><button class="btn btn-primary w-100">Agregar</button></div>
+  </form>
+  {% else %}
+  <p class="text-muted small mb-0">Primero registra al menos una obra.</p>
+  {% endif %}
+</div>
+{% else %}
+<p class="text-muted small">Solo gerente de obra o superior puede editar el catalogo.</p>
+{% endif %}
+<div class="card">
+  <table class="table table-sm mb-0">
+    <thead><tr><th>Obra</th><th>Puesto</th><th class="text-end">Sueldo semanal</th><th class="text-end">Viaticos semanales</th></tr></thead>
+    <tbody>
+      {% for p in puestos %}
+      <tr><td>{{ p.obra }}</td><td>{{ p.puesto }}</td>
+        <td class="text-end">${{ '%.2f'|format(p.sueldo_semanal) }}</td>
+        <td class="text-end">${{ '%.2f'|format(p.viaticos_semanales) }}</td></tr>
+      {% else %}
+      <tr><td colspan="4" class="text-center text-muted py-3">Aun no hay puestos.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
