@@ -320,6 +320,10 @@ CREATE TABLE IF NOT EXISTS nomina_detalle (
     nota TEXT,
     FOREIGN KEY (nomina_id) REFERENCES nominas(id)
 );
+CREATE TABLE IF NOT EXISTS clasificaciones (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre TEXT UNIQUE NOT NULL
+);
 CREATE TABLE IF NOT EXISTS bitacora (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     fecha TEXT,
@@ -399,6 +403,13 @@ def init_db():
         db.execute("ALTER TABLE nomina_detalle ADD COLUMN bono REAL DEFAULT 0")
     except sqlite3.OperationalError:
         pass
+    # Migracion suave: sembrar la tabla de clasificaciones con la lista fija anterior
+    if db.execute("SELECT COUNT(*) FROM clasificaciones").fetchone()[0] == 0:
+        for nombre in CLASIFICACIONES:
+            try:
+                db.execute("INSERT INTO clasificaciones(nombre) VALUES(?)", (nombre,))
+            except sqlite3.IntegrityError:
+                pass
     # Crear usuario administrador la primera vez
     row = db.execute("SELECT COUNT(*) FROM users").fetchone()
     if row[0] == 0:
@@ -1258,9 +1269,50 @@ def catalogo():
         sql += " WHERE " + " AND ".join(where)
     sql += " ORDER BY o.nombre, p.nombre"
     puestos = db.execute(sql, args).fetchall()
+    clasif_rows = db.execute(
+        "SELECT c.id, c.nombre, "
+        "(SELECT COUNT(*) FROM puestos p WHERE p.clasificacion = c.nombre) AS usos "
+        "FROM clasificaciones c ORDER BY c.nombre"
+    ).fetchall()
     return render_template("catalogo_list.html", obras=obras_l, puestos=puestos,
                            filtro_obra=filtro_obra,
-                           clasificaciones=CLASIFICACIONES)
+                           clasificaciones=[c["nombre"] for c in clasif_rows],
+                           clasif_rows=clasif_rows)
+
+
+@app.route("/clasificacion/agregar", methods=["POST"])
+@min_rank(GERENTE_RANK)
+def clasificacion_agregar():
+    db = get_db()
+    nombre = titulo(request.form.get("nombre", "").strip())
+    if not nombre:
+        flash("Escribe un nombre para la clasificacion.", "warning")
+    else:
+        try:
+            db.execute("INSERT INTO clasificaciones(nombre) VALUES(?)", (nombre,))
+            db.commit()
+            flash(f"Clasificacion '{nombre}' agregada.", "success")
+        except sqlite3.IntegrityError:
+            flash(f"La clasificacion '{nombre}' ya existe.", "warning")
+    return redirect(url_for("catalogo"))
+
+
+@app.route("/clasificacion/<int:clasificacion_id>/eliminar", methods=["POST"])
+@min_rank(GERENTE_RANK)
+def clasificacion_eliminar(clasificacion_id):
+    db = get_db()
+    c = db.execute("SELECT * FROM clasificaciones WHERE id=?", (clasificacion_id,)).fetchone()
+    if not c:
+        abort(404)
+    usos = db.execute("SELECT COUNT(*) FROM puestos WHERE clasificacion=?", (c["nombre"],)).fetchone()[0]
+    if usos > 0:
+        flash(f"No se puede eliminar '{c['nombre']}': esta asignada a {usos} puesto(s). "
+              "Cambia esos puestos a otra clasificacion primero.", "danger")
+    else:
+        db.execute("DELETE FROM clasificaciones WHERE id=?", (clasificacion_id,))
+        db.commit()
+        flash(f"Clasificacion '{c['nombre']}' eliminada.", "success")
+    return redirect(url_for("catalogo"))
 
 
 @app.route("/puesto/<int:puesto_id>/editar", methods=["GET", "POST"])
@@ -1284,7 +1336,9 @@ def puesto_editar(puesto_id):
         db.commit()
         flash("Puesto actualizado.", "success")
         return redirect(url_for("catalogo"))
-    return render_template("puesto_form.html", p=p, clasificaciones=CLASIFICACIONES)
+    clasificaciones = [r["nombre"] for r in
+                       db.execute("SELECT nombre FROM clasificaciones ORDER BY nombre").fetchall()]
+    return render_template("puesto_form.html", p=p, clasificaciones=clasificaciones)
 
 # ---------------------------------------------------------------------------
 # Personal

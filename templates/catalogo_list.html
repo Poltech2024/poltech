@@ -3,6 +3,34 @@
 <h3 class="mb-3">Catalogo de sueldos por obra</h3>
 {% if current_user.rank >= GERENTE_RANK %}
 <div class="card p-3 mb-4">
+  <h6 class="text-navy">Clasificaciones</h6>
+  <div class="d-flex flex-wrap gap-2 mb-3">
+    {% for c in clasif_rows %}
+    <span class="badge text-bg-light border d-flex align-items-center gap-2 py-2 px-2">
+      {{ c.nombre }}
+      {% if c.usos == 0 %}
+      <form method="post" action="{{ url_for('clasificacion_eliminar', clasificacion_id=c.id) }}"
+            onsubmit="return confirm('Eliminar la clasificacion \'{{ c.nombre }}\'?');" class="d-inline m-0">
+        <button class="btn btn-sm btn-link text-danger p-0 border-0" style="line-height:1;" title="Eliminar">&times;</button>
+      </form>
+      {% else %}
+      <span class="text-muted small" title="En uso por {{ c.usos }} puesto(s), no se puede eliminar">(en uso: {{ c.usos }})</span>
+      {% endif %}
+    </span>
+    {% else %}
+    <span class="text-muted small">Aun no hay clasificaciones.</span>
+    {% endfor %}
+  </div>
+  <form method="post" action="{{ url_for('clasificacion_agregar') }}" class="row g-2">
+    <div class="col-md-4">
+      <input name="nombre" class="form-control form-control-sm" placeholder="Nueva clasificacion (ej. Electricistas)" required>
+    </div>
+    <div class="col-md-2">
+      <button class="btn btn-sm btn-outline-primary w-100">Agregar</button>
+    </div>
+  </form>
+</div>
+<div class="card p-3 mb-4">
   <h6 class="text-navy">Agregar puesto</h6>
   {% if obras %}
   <form method="post" class="row g-2">
