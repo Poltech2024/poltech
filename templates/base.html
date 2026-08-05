@@ -20,8 +20,17 @@
     .text-navy{ color:var(--navy); }
     .card-stat .num{ font-size:2rem; font-weight:700; color:var(--navy); }
     .table thead th{ background:var(--navy); color:#fff; font-size:.82rem; }
+    .table-sticky-first td:first-child, .table-sticky-first th:first-child{
+      position:sticky; left:0; z-index:2; background-color:#fff;
+      box-shadow:2px 0 4px rgba(0,0,0,.08);
+    }
+    .table-sticky-first thead th:first-child{ background-color:var(--navy); z-index:3; }
+    .table-sticky-first tr.table-warning td:first-child{ background-color:#fff3cd; }
+    .table-sticky-first tfoot td:first-child{ background-color:#f8f9fa; }
     .sidebar a{ color:var(--navy); text-decoration:none; display:block; padding:.5rem .75rem; border-radius:.4rem; font-weight:600; }
     .sidebar a:hover, .sidebar a.active{ background:#fff; color:var(--azul); }
+    .sidebar .group-label{ font-size:.72rem; text-transform:uppercase; letter-spacing:.04em; color:#6B7280; font-weight:700; margin:1rem 0 .25rem .75rem; }
+    .sidebar .group-label:first-child{ margin-top:.25rem; }
     h1,h2,h3{ color:var(--navy); }
   </style>
 </head>
@@ -48,17 +57,24 @@
     {% if current_user.id %}
     <div class="col-lg-2 mb-3 sidebar">
       <a href="{{ url_for('dashboard') }}">Inicio</a>
+
+      <div class="group-label">Personal</div>
       <a href="{{ url_for('personal') }}">Personal</a>
       <a href="{{ url_for('bajas') }}">Bajas</a>
       <a href="{{ url_for('contratos') }}">Contratos</a>
+      <a href="{{ url_for('cuentas') }}">Cuentas bancarias</a>
       <a href="{{ url_for('apimarket_tool') }}">API market</a>
+
+      <div class="group-label">Nomina</div>
       <a href="{{ url_for('asistencia_inicio') }}">Asistencia semanal</a>
       <a href="{{ url_for('nomina') }}">Calcular nomina</a>
-      <a href="{{ url_for('cuentas') }}">Cuentas bancarias</a>
+
+      <div class="group-label">Configuracion</div>
       <a href="{{ url_for('obras') }}">Obras</a>
       <a href="{{ url_for('catalogo') }}">Catalogo de sueldos</a>
       {% if current_user.rank >= 100 %}<a href="{{ url_for('usuarios') }}">Usuarios</a>{% endif %}
       {% if current_user.rank >= 100 %}<a href="{{ url_for('parametros') }}">Parametros</a>{% endif %}
+
       <div class="text-muted small mt-3 ps-2">Version {{ APP_VERSION }}</div>
     </div>
     {% endif %}

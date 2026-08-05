@@ -1032,29 +1032,29 @@ def generar_baja_docx(db, emp):
     if rfc_emp or dom:
         par(f"RFC: {rfc_emp}   {dom}", center=True, size=9, color=(0x55, 0x55, 0x55), space=12)
     par("AVISO DE BAJA DE TRABAJADOR", bold=True, center=True, size=13, color=(0xE1, 0x28, 0x1A), space=14)
-    par(f"Ciudad de Mexico, a {fecha_txt}.", space=14)
+    par(f"Ciudad de México, a {fecha_txt}.", space=14)
 
     par("A QUIEN CORRESPONDA / INSTITUTO MEXICANO DEL SEGURO SOCIAL:", bold=True, space=10)
     par(f"Por medio del presente, la empresa {razon} hace constar la BAJA del trabajador "
-        f"que a continuacion se detalla, para los efectos administrativos y de seguridad "
+        f"que a continuación se detalla, para los efectos administrativos y de seguridad "
         f"social correspondientes:", just=True, space=12)
 
     par_hl("Nombre del trabajador: ", nombre)
-    par_hl("Numero de Seguridad Social (NSS): ", emp["nss"])
+    par_hl("Número de Seguridad Social (NSS): ", emp["nss"])
     par_hl("CURP: ", emp["curp"])
     par_hl("RFC: ", emp["rfc"])
     par_hl("Puesto: ", puesto)
     par_hl("Obra / centro de trabajo: ", obra)
     par_hl("Fecha de ingreso: ", emp["fecha_alta"])
-    par_hl("Fecha de baja (ultimo dia laborado): ", fbaja)
+    par_hl("Fecha de baja (último día laborado): ", fbaja)
     par_hl("Motivo de la baja: ", motivo, space=14)
 
-    par("Se solicita realizar los tramites correspondientes ante el IMSS y demas "
-        "instancias aplicables. Sin otro particular, quedo a sus ordenes.", just=True, space=28)
+    par("Se solicita realizar los trámites correspondientes ante el IMSS y demás "
+        "instancias aplicables. Sin otro particular, quedo a sus órdenes.", just=True, space=28)
 
     par("_________________________________________", center=True, space=2)
     par_hl2 = par(f"{rep}", center=True, bold=True, space=0) if rep else par("____________________", center=True, space=0)
-    par(f"En representacion de {razon}", center=True, size=10, space=0)
+    par(f"En representación de {razon}", center=True, size=10, space=0)
 
     buf = io.BytesIO(); doc.save(buf); buf.seek(0)
     slug = re.sub(r"[^A-Za-z0-9]+", "_", nombre).strip("_")
@@ -1968,10 +1968,10 @@ def generar_vigencia_docx(db, vig, curp):
     if razon:
         par(razon, center=True, size=10, color=(0x16, 0x23, 0x3C), space=12)
     par(f"Fecha de consulta: {date.today().strftime('%d/%m/%Y')}", space=12)
-    par(f"Numero de Seguridad Social (NSS): {vig['nss']}", bold=True, space=4)
+    par(f"Número de Seguridad Social (NSS): {vig['nss']}", bold=True, space=4)
     par(f"CURP: {curp}", bold=True, space=12)
 
-    par(f"Con derecho a servicio medico: {vig['servicio_medico']}", space=4)
+    par(f"Con derecho a servicio médico: {vig['servicio_medico']}", space=4)
     par(f"Con derecho a incapacidades: {vig['incapacidad']}", space=4)
     if vig["vigente_hasta"]:
         par(f"Vigente hasta: {vig['vigente_hasta']}", space=12)
@@ -1979,8 +1979,8 @@ def generar_vigencia_docx(db, vig, curp):
         par("", space=8)
 
     if vig["codigo"]:
-        par(f"Codigo de validacion: {vig['codigo']}", size=9, color=(0x55, 0x55, 0x55), space=4)
-    par("Consulta realizada a traves de API Market (fuente: IMSS). Documento informativo.",
+        par(f"Código de validación: {vig['codigo']}", size=9, color=(0x55, 0x55, 0x55), space=4)
+    par("Consulta realizada a través de API Market (fuente: IMSS). Documento informativo.",
         size=8, color=(0x88, 0x88, 0x88), space=0)
 
     buf = io.BytesIO(); doc.save(buf); buf.seek(0)
