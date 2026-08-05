@@ -1,0 +1,215 @@
+{% extends "base.html" %}
+{% block title %}Nomina {{ n.obra }} - Nomina Poltech{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-start mb-3 flex-wrap gap-2">
+  <div>
+    <h3 class="mb-1">Nomina calculada
+      {% if (n.estatus or 'pendiente') == 'autorizada' %}
+      <span class="badge text-bg-success align-middle">Autorizada</span>
+      {% else %}
+      <span class="badge text-bg-warning text-dark align-middle">Pendiente de autorizar</span>
+      {% endif %}
+    </h3>
+    <div class="text-muted">
+      <b class="text-navy">{{ n.obra }}</b> &middot; {{ n.estado }}
+      &nbsp;|&nbsp; Semana <b>#{{ n.semana_num }}</b> / {{ n.anio }}
+      &nbsp;|&nbsp; {{ n.fecha_inicio }} al {{ n.fecha_fin }}
+    </div>
+    <div class="small text-muted mt-1">Calculada por {{ n.creada_por }}.
+      {% if (n.estatus or 'pendiente') == 'autorizada' %}
+      Autorizada y liberada por <b>{{ n.autorizada_por }}</b> el {{ n.autorizada_en }}.
+      {% endif %}
+    </div>
+  </div>
+  <div class="d-flex gap-2 align-items-start">
+    {% if (n.estatus or 'pendiente') != 'autorizada' and current_user.rank >= GERENTE_RANK %}
+    <form method="post" action="{{ url_for('nomina_autorizar', nomina_id=n.id) }}"
+          onsubmit="return confirm('Autorizar y liberar esta nomina para pago?');">
+      <button class="btn btn-success">Autorizar y liberar</button>
+    </form>
+    {% endif %}
+    {% if (n.estatus or 'pendiente') == 'autorizada' and current_user.rank >= ADMIN_RANK %}
+    <form method="post" action="{{ url_for('nomina_reabrir', nomina_id=n.id) }}"
+          onsubmit="return confirm('Quitar la autorizacion y regresar la nomina a pendiente?');">
+      <button class="btn btn-outline-warning">Quitar autorizacion</button>
+    </form>
+    {% endif %}
+    <a class="btn btn-outline-primary" href="{{ url_for('nomina_excel', nomina_id=n.id) }}">Descargar Excel</a>
+    {% if current_user.rank >= GERENTE_RANK %}
+    <form method="post" action="{{ url_for('nomina_eliminar', nomina_id=n.id) }}"
+          onsubmit="return confirm('Eliminar este calculo de nomina? No se puede deshacer.');">
+      <button class="btn btn-outline-danger">Eliminar</button>
+    </form>
+    {% endif %}
+    <a class="btn btn-outline-secondary" href="{{ url_for('nomina') }}">&laquo; Volver</a>
+  </div>
+</div>
+
+{% if bajas %}
+<div class="alert alert-warning">
+  <b>Bajas reportadas en esta nomina:</b>
+  <ul class="mb-0 mt-1">
+    {% for b in bajas %}
+    <li>{{ b.nombre }} (cedula {{ b.cedula }}) &mdash; ultimo dia: <b>{{ b.baja_fecha }}</b>.
+      Se marco de baja y se preparo el aviso para tramitar ante el IMSS.</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+<div class="card">
+  <div class="table-responsive">
+    <table class="table table-sm table-hover align-middle mb-0" style="font-size:.85rem;">
+      <thead>
+        <tr class="text-center">
+          <th class="text-start">Trabajador</th>
+          <th class="text-end">Sueldo contratado</th><th class="text-end">Viaticos contratados</th>
+          <th>Dias</th><th>Faltas</th><th>Ret.</th><th>Vac.</th>
+          <th class="text-end">Sueldo</th><th class="text-end">Viaticos</th><th class="text-end">Bono</th>
+          <th>Horas extra</th><th class="text-end">Importe H.E.</th>
+          <th class="text-end">INFONAVIT</th><th class="text-end">Desc. nom.</th>
+          <th class="text-end">Desc. otra</th><th class="text-end">Desc. ret.</th>
+          <th class="text-end">Neto</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for d in det %}
+        <tr class="{% if d.baja_fecha %}table-warning{% endif %}">
+          <td><b>{{ d.nombre }}</b> <span class="text-muted small">{{ d.cedula }}</span></td>
+          <td class="text-end text-muted">{{ d.sueldo_contratado|money }}</td>
+          <td class="text-end text-muted">{{ d.viaticos_contratado|money }}</td>
+          <td class="text-center">{{ d.dias }}</td>
+          <td class="text-center">{{ d.faltas }}</td>
+          <td class="text-center">{{ d.retardos|int }}</td>
+          <td class="text-center">{{ d.vacaciones }}</td>
+          <td class="text-end">{{ d.sueldo|money }}</td>
+          <td class="text-end">{{ d.viaticos|money }}</td>
+          <td class="text-end">{{ d.bono|money }}</td>
+          <td class="text-center">{{ d.he_horas|round(1) }}</td>
+          <td class="text-end">{{ d.he_importe|money }}</td>
+          <td class="text-end">{{ d.infonavit|money }}</td>
+          <td class="text-end">{{ d.desc_nomina|money }}</td>
+          <td class="text-end">{{ d.desc_otra|money }}{% if d.nota %}<br><span class="small text-primary">&rarr; {{ d.nota }}</span>{% endif %}</td>
+          <td class="text-end">{{ d.desc_retardos|money }}</td>
+          <td class="text-end fw-bold text-navy">{{ d.neto|money }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr class="table-light fw-bold">
+          <td class="text-end" colspan="7">TOTALES</td>
+          <td class="text-end">{{ tot.sueldo|money }}</td>
+          <td class="text-end">{{ tot.viaticos|money }}</td>
+          <td class="text-end">{{ tot.bono|money }}</td>
+          <td></td>
+          <td class="text-end">{{ tot.he_importe|money }}</td>
+          <td class="text-end">{{ tot.infonavit|money }}</td>
+          <td class="text-end">{{ tot.desc_nomina|money }}</td>
+          <td class="text-end">{{ tot.desc_otra|money }}</td>
+          <td class="text-end">{{ tot.desc_retardos|money }}</td>
+          <td class="text-end text-navy">{{ tot.neto|money }}</td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+</div>
+<p class="text-muted small mt-2">
+  Sueldo = sueldo diario x dias pagables (A, R, V). Viaticos = viatico diario x dias presentes (A, R).
+  Horas extra por factor (sueldo/hora x factor) o precio pactado. Jornada base: {{ n.jornada }} horas.
+  {% if not n.aplico_retardos %}El descuento por retardos no se aplico en esta nomina.{% endif %}
+</p>
+
+<div class="card mt-3" style="max-width:480px">
+  <div class="card-header bg-white fw-bold text-navy">Total pagado por clasificacion</div>
+  <table class="table table-sm mb-0 align-middle">
+    <thead><tr><th>Clasificacion</th><th class="text-center">Trabajadores</th><th class="text-end">Neto</th></tr></thead>
+    <tbody>
+      {% for k, g in por_clasif.items() %}
+      <tr><td>{{ k }}</td><td class="text-center">{{ g.num }}</td><td class="text-end">{{ g.neto|money }}</td></tr>
+      {% endfor %}
+    </tbody>
+    <tfoot><tr class="table-light fw-bold"><td>TOTAL</td><td class="text-center">{{ det|length }}</td><td class="text-end text-navy">{{ tot.neto|money }}</td></tr></tfoot>
+  </table>
+</div>
+
+<div class="card mt-4">
+  <div class="card-header bg-white fw-bold text-navy">Nomina real vs. lo que sale de caja</div>
+  <div class="card-body">
+    <div class="row g-3 mb-3">
+      <div class="col-md-4">
+        <div class="border rounded p-3 h-100">
+          <div class="small text-muted">Nomina real (devengado)</div>
+          <div class="fs-4 fw-bold text-navy">{{ caja.devengado|money }}</div>
+          <div class="small text-muted">Sueldo + viaticos + horas extra</div>
+        </div>
+      </div>
+      <div class="col-md-4">
+        <div class="border rounded p-3 h-100">
+          <div class="small text-muted">Se queda en caja</div>
+          <div class="fs-4 fw-bold" style="color:#B8860B">{{ caja.se_queda|money }}</div>
+          <div class="small text-muted">INFONAVIT {{ caja.infonavit|money }} &middot; Desc. nomina {{ caja.desc_nomina|money }} &middot; Retardos {{ caja.desc_retardos|money }}</div>
+        </div>
+      </div>
+      <div class="col-md-4">
+        <div class="border rounded p-3 h-100" style="background:#eafaf1">
+          <div class="small text-muted">SALE de caja</div>
+          <div class="fs-4 fw-bold text-success">{{ caja.sale|money }}</div>
+          <div class="small text-muted">Al trabajador {{ caja.neto|money }} &middot; A terceros {{ caja.traspaso|money }}</div>
+        </div>
+      </div>
+    </div>
+    <p class="small text-muted">El INFONAVIT se retiene y se queda en caja para pagarlo cuando llegue el recibo.
+    Faltas y retardos no se pagan (se quedan). Los traspasos a terceros (deposito a otra cuenta) si salen de la empresa.</p>
+
+    <div class="row g-3 mb-3">
+      <div class="col-md-4">
+        <div class="border rounded p-3 h-100">
+          <div class="small text-muted">Despacho ({{ pct_despacho|round(2) }}% del neto)</div>
+          <div class="fs-5 fw-bold" style="color:#0A56C0">{{ despacho|money }}</div>
+        </div>
+      </div>
+      <div class="col-md-4">
+        <div class="border rounded p-3 h-100" style="background:#eef4ff">
+          <div class="small text-muted">TOTAL A PAGAR (neto + despacho)</div>
+          <div class="fs-4 fw-bold text-navy">{{ total_a_pagar|money }}</div>
+        </div>
+      </div>
+    </div>
+
+    <table class="table table-sm align-middle">
+      <thead>
+        <tr class="text-center">
+          <th class="text-start">Trabajador</th>
+          <th class="text-end">Nomina real</th>
+          <th class="text-end">Se queda</th>
+          <th class="text-end">Traspaso a 3ro</th>
+          <th class="text-end">Neto al trabajador</th>
+          <th class="text-end">Sale de caja</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in caja_rows %}
+        <tr>
+          <td><b>{{ c.nombre }}</b> <span class="text-muted small">{{ c.cedula }}</span></td>
+          <td class="text-end">{{ c.devengado|money }}</td>
+          <td class="text-end" style="color:#B8860B">{{ c.se_queda|money }}</td>
+          <td class="text-end">{{ c.traspaso|money }}{% if c.nota %}<br><span class="small text-primary">&rarr; {{ c.nota }}</span>{% endif %}</td>
+          <td class="text-end">{{ c.neto|money }}</td>
+          <td class="text-end fw-bold text-success">{{ c.sale|money }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr class="table-light fw-bold text-end">
+          <td class="text-start">TOTALES</td>
+          <td>{{ caja.devengado|money }}</td>
+          <td style="color:#B8860B">{{ caja.se_queda|money }}</td>
+          <td>{{ caja.traspaso|money }}</td>
+          <td>{{ caja.neto|money }}</td>
+          <td class="text-success">{{ caja.sale|money }}</td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+</div>
+{% endblock %}

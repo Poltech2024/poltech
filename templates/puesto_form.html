@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Editar puesto - Nomina Poltech{% endblock %}
+{% block content %}
+<h3 class="mb-1">Editar puesto</h3>
+<p class="text-muted small mb-3">Obra: <b>{{ p.obra }}</b></p>
+<div class="card p-4" style="max-width:640px">
+  <form method="post" class="row g-3">
+    <div class="col-md-6">
+      <label class="form-label">Puesto</label>
+      <input name="nombre" class="form-control" value="{{ p.nombre }}" required>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">Clasificacion</label>
+      <select name="clasificacion" class="form-select" required>
+        <option value="">Selecciona...</option>
+        {% for c in clasificaciones %}<option {{ 'selected' if p.clasificacion==c }}>{{ c }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">Sueldo semanal</label>
+      <div class="input-group"><span class="input-group-text">$</span>
+        <input name="sueldo_semanal" type="number" step="0.01" class="form-control" value="{{ p.sueldo_semanal }}" required></div>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">Viaticos semanales</label>
+      <div class="input-group"><span class="input-group-text">$</span>
+        <input name="viaticos_semanales" type="number" step="0.01" class="form-control" value="{{ p.viaticos_semanales }}"></div>
+    </div>
+    <div class="col-12 d-flex gap-2">
+      <button class="btn btn-primary">Guardar cambios</button>
+      <a class="btn btn-outline-secondary" href="{{ url_for('catalogo') }}">Cancelar</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

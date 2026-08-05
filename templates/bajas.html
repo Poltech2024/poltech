@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Bajas - Nomina Poltech{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h3 class="mb-0">Bajas de personal</h3>
+  <a class="btn btn-outline-primary" href="{{ url_for('bajas_excel', obra_id=f_obra, desde=f_desde, hasta=f_hasta) }}">Descargar Excel</a>
+</div>
+
+<div class="card mb-3">
+  <form method="get" class="row g-2 align-items-end">
+    <div class="col-md-4">
+      <label class="form-label small mb-1">Obra</label>
+      <select name="obra_id" class="form-select">
+        <option value="">Todas</option>
+        {% for o in obras %}<option value="{{ o.id }}" {{ 'selected' if f_obra == o.id|string }}>{{ o.nombre }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="col-md-3"><label class="form-label small mb-1">Desde</label>
+      <input type="date" name="desde" class="form-control" value="{{ f_desde }}"></div>
+    <div class="col-md-3"><label class="form-label small mb-1">Hasta</label>
+      <input type="date" name="hasta" class="form-control" value="{{ f_hasta }}"></div>
+    <div class="col-md-2 d-flex gap-2">
+      <button class="btn btn-primary">Filtrar</button>
+      <a class="btn btn-outline-secondary" href="{{ url_for('bajas') }}">Limpiar</a>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead>
+        <tr><th>Trabajador</th><th>NSS</th><th>Puesto</th><th>Obra</th>
+          <th>Ingreso</th><th>Baja</th><th>Motivo</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for b in bajas %}
+        <tr>
+          <td><b>{{ b.primer_apellido }} {{ b.segundo_apellido or '' }} {{ b.nombre }}</b>
+            <span class="text-muted small">{{ b.cedula }}</span></td>
+          <td class="small">{{ b.nss }}</td>
+          <td class="small">{{ b.puesto }}</td>
+          <td class="small">{{ b.obra }}</td>
+          <td class="small">{{ b.fecha_alta }}</td>
+          <td class="small"><b>{{ b.fecha_baja }}</b></td>
+          <td class="small">{{ b.motivo_baja or '-' }}</td>
+          <td class="text-end" style="min-width:210px">
+            <a class="btn btn-sm btn-outline-primary" href="{{ url_for('escrito_baja', emp_id=b.id) }}">Aviso de baja</a>
+            {% if current_user.rank >= GERENTE_RANK %}
+            <form method="post" action="{{ url_for('personal_reactivar', emp_id=b.id) }}" class="d-inline"
+                  onsubmit="return confirm('Reactivar a este trabajador?');">
+              <button class="btn btn-sm btn-outline-success">Reactivar</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8" class="text-center text-muted py-3">No hay bajas registradas.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

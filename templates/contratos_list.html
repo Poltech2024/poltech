@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Contratos - Nomina Poltech{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h3 class="mb-0">Contratos generados</h3>
+  <form method="post" action="{{ url_for('contratos_generar_todos') }}"
+        onsubmit="return confirm('Generar el contrato de todo el personal activo que aun no tenga uno?');">
+    <button class="btn btn-primary">Generar contratos del personal dado de alta</button>
+  </form>
+</div>
+<p class="text-muted small">Cada alta genera el contrato del trabajador con su informacion. Los datos que el
+sistema no captura (escolaridad, estado civil, domicilio, beneficiario, correo) quedan como linea para
+completar a mano. Descarga, revisa y marca como revisado.</p>
+
+<div class="card">
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead>
+        <tr><th>Trabajador</th><th>Obra</th><th>Puesto</th><th class="small">Generado</th>
+          <th class="text-center">Estatus</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for c in contratos %}
+        <tr>
+          <td><b>{{ c.primer_apellido }} {{ c.segundo_apellido or '' }} {{ c.nombre }}</b>
+            <span class="text-muted small">{{ c.cedula }}</span></td>
+          <td class="small">{{ c.obra }}</td>
+          <td class="small">{{ c.puesto }}</td>
+          <td class="small text-muted">{{ c.generado_en[:16] if c.generado_en else '' }}<br>por {{ c.generado_por }}</td>
+          <td class="text-center">
+            {% if c.estatus == 'revisado' %}
+            <span class="badge text-bg-success">Revisado</span>
+            <div class="small text-muted">{{ c.revisado_por }}</div>
+            {% else %}<span class="badge text-bg-warning text-dark">Generado</span>{% endif %}
+          </td>
+          <td class="text-end" style="min-width:200px">
+            <a class="btn btn-sm btn-outline-primary" href="{{ url_for('contrato_descargar', cid=c.id) }}">Descargar</a>
+            {% if current_user.rank >= GERENTE_RANK and c.estatus != 'revisado' %}
+            <form method="post" action="{{ url_for('contrato_revisado', cid=c.id) }}" class="d-inline">
+              <button class="btn btn-sm btn-outline-success">Marcar revisado</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="text-center text-muted py-3">Aun no se ha generado ningun contrato.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

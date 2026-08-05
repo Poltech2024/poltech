@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h3 class="mb-0">Carga trabajadores (masiva)</h3>
+  <a class="btn btn-outline-secondary" href="{{ url_for('personal') }}">Volver a Personal</a>
+</div>
+
+<div class="card p-4 mb-3">
+  <p class="text-muted mb-2">1. Descarga la plantilla &middot; 2. Llenala &middot; 3. Subela aqui.</p>
+  <div class="mb-3">
+    <a class="btn btn-primary" href="{{ url_for('personal_plantilla') }}">Descargar plantilla de alta de trabajadores</a>
+  </div>
+  <form method="post" enctype="multipart/form-data" class="row g-2 align-items-center">
+    <div class="col-md-6"><input type="file" name="archivo" accept=".xlsx" class="form-control" required></div>
+    <div class="col-md-3"><button class="btn btn-primary w-100">Subir y procesar</button></div>
+  </form>
+  <div class="form-text mt-2">
+    La <b>obra</b> y el <b>puesto</b> deben existir en tu catalogo; si no coinciden, esa fila se rechaza.
+    La <b>cedula</b> se genera automaticamente para cada trabajador nuevo.
+  </div>
+</div>
+
+{% if resumen %}
+<div class="card p-4">
+  <h5 class="text-navy">Resultado</h5>
+  <p class="mb-2"><b>{{ resumen.creados }}</b> trabajadores creados.
+    {% if resumen.contratos is defined %}<b>{{ resumen.contratos }}</b> contratos generados
+    (revisalos en <a href="{{ url_for('contratos') }}">Contratos</a>).{% endif %}</p>
+
+  {% if resumen.duplicadas %}
+  <div class="alert alert-warning">
+    <b>Cuentas bancarias duplicadas ({{ resumen.duplicadas|length }}):</b>
+    <ul class="mb-0">{% for d in resumen.duplicadas %}<li>{{ d }}</li>{% endfor %}</ul>
+    <div class="small mt-1">Se aviso al administrador. El trabajador se creo, pero sin la cuenta repetida.</div>
+  </div>
+  {% endif %}
+
+  {% if resumen.errores %}
+  <div class="alert alert-danger">
+    <b>Filas con error ({{ resumen.errores|length }}) &mdash; no se cargaron:</b>
+    <ul class="mb-0">{% for e in resumen.errores %}<li>{{ e }}</li>{% endfor %}</ul>
+  </div>
+  {% endif %}
+
+  {% if not resumen.errores and not resumen.duplicadas %}
+  <div class="alert alert-success mb-0">Todo se cargo sin problemas.</div>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

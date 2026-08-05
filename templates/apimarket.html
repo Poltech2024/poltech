@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}API market - Nomina Poltech{% endblock %}
+{% block content %}
+<h3 class="mb-1">Consultas API market (IMSS)</h3>
+<p class="text-muted small">Obtiene o confirma el NSS a partir del CURP, y consulta la vigencia de derechos.
+{% if not configurado %}<span class="text-danger">Falta configurar el token y las URLs en
+<a href="{{ url_for('parametros') }}">Parametros</a>.</span>{% endif %}</p>
+
+<div class="row g-3">
+  <div class="col-md-6">
+    <div class="card p-3">
+      <h6 class="text-navy">Obtener NSS por CURP</h6>
+      <form method="post" class="row g-2">
+        <input type="hidden" name="tipo" value="nss">
+        <div class="col-12"><input name="curp" class="form-control" placeholder="CURP (18 caracteres)" maxlength="18" required></div>
+        <div class="col-12"><button class="btn btn-primary w-100">Consultar NSS</button></div>
+      </form>
+    </div>
+  </div>
+  <div class="col-md-6">
+    <div class="card p-3">
+      <h6 class="text-navy">Consultar vigencia</h6>
+      <form method="post" class="row g-2">
+        <input type="hidden" name="tipo" value="vigencia">
+        <div class="col-md-6"><input name="nss" class="form-control" placeholder="NSS (11 digitos)" maxlength="11" required></div>
+        <div class="col-md-6"><input name="curp" class="form-control" placeholder="CURP" maxlength="18" required></div>
+        <div class="col-12"><button class="btn btn-primary w-100">Consultar vigencia</button></div>
+      </form>
+    </div>
+  </div>
+</div>
+
+{% if resultado %}
+<div class="card p-3 mt-3">
+  <h6 class="mb-2">{{ resultado.titulo }}</h6>
+  {% if resultado.ok %}
+    {% if resultado.tipo == 'nss' and resultado.nss %}
+      <p class="mb-2">NSS encontrado: <b class="text-navy fs-5">{{ resultado.nss }}</b></p>
+    {% endif %}
+    {% if resultado.tipo == 'vigencia' and resultado.vig %}
+      <div class="row g-2 mb-3">
+        <div class="col-md-4"><div class="border rounded p-2"><div class="small text-muted">NSS</div><b>{{ resultado.vig.nss }}</b></div></div>
+        <div class="col-md-4"><div class="border rounded p-2"><div class="small text-muted">Con derecho a servicio medico</div>
+          <b class="{{ 'text-success' if resultado.vig.servicio_medico == 'SI' else 'text-danger' }}">{{ resultado.vig.servicio_medico }}</b></div></div>
+        <div class="col-md-4"><div class="border rounded p-2"><div class="small text-muted">Con derecho a incapacidades</div>
+          <b class="{{ 'text-success' if resultado.vig.incapacidad == 'SI' else 'text-danger' }}">{{ resultado.vig.incapacidad }}</b></div></div>
+        {% if resultado.vig.vigente_hasta %}
+        <div class="col-md-4"><div class="border rounded p-2"><div class="small text-muted">Vigente hasta</div><b>{{ resultado.vig.vigente_hasta }}</b></div></div>
+        {% endif %}
+      </div>
+      {% if resultado.vig_json %}
+      <form method="post" action="{{ url_for('apimarket_vigencia_comprobante') }}" class="mb-3">
+        <input type="hidden" name="vig_json" value="{{ resultado.vig_json }}">
+        <button class="btn btn-success">Descargar comprobante (Word)</button>
+      </form>
+      {% endif %}
+    {% endif %}
+    <label class="form-label small text-muted">Respuesta completa del servicio:</label>
+    <pre class="bg-light p-2 small" style="max-height:300px;overflow:auto">{{ resultado.raw }}</pre>
+  {% else %}
+    <div class="alert alert-danger py-2 small mb-0">{{ resultado.error }}</div>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

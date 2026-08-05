@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}Asistencia semanal - Nomina Poltech{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h3 class="mb-0">Asistencia semanal</h3>
+  <span class="badge text-bg-light">Semana viernes a jueves &middot; base de 6 dias</span>
+</div>
+
+<div class="card p-3 mb-4">
+  <h6 class="text-navy">Abrir una semana para capturar</h6>
+  <form method="get" action="{{ url_for('asistencia_captura') }}" class="row g-2 align-items-end">
+    <div class="col-md-5">
+      <label class="form-label small mb-1">Obra</label>
+      <select name="obra_id" class="form-select" required>
+        <option value="">Selecciona una obra...</option>
+        {% for o in obras %}<option value="{{ o.id }}">{{ o.nombre }} &mdash; {{ o.estado }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="col-md-4">
+      <label class="form-label small mb-1">Semana (elige cualquier dia; se ajusta al viernes)</label>
+      <input type="date" name="fecha_inicio" class="form-control" value="{{ viernes_default }}" required>
+    </div>
+    <div class="col-md-3">
+      <button class="btn btn-primary w-100">Abrir captura</button>
+    </div>
+  </form>
+  {% if not obras %}
+  <p class="text-muted small mt-2 mb-0">No tienes obras asignadas para capturar asistencia.</p>
+  {% endif %}
+</div>
+
+<div class="card p-3 mb-4 border-primary">
+  <h6 class="text-navy">Descargar Excel de asistencia por obra</h6>
+  <p class="small text-muted mb-2">Genera la lista de la semana con los <b>activos</b> (para capturar) y una hoja
+  aparte con las <b>bajas</b> (solo referencia). Descargalo el jueves, actualiza las faltas y subelo despues.</p>
+  <form method="get" action="{{ url_for('asistencia_plantilla') }}" class="row g-2 align-items-end">
+    <div class="col-md-5">
+      <label class="form-label small mb-1">Obra</label>
+      <select name="obra_id" class="form-select" required>
+        <option value="">Selecciona una obra...</option>
+        {% for o in obras %}<option value="{{ o.id }}">{{ o.nombre }} &mdash; {{ o.estado }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="col-md-4">
+      <label class="form-label small mb-1">Semana</label>
+      <input type="date" name="fecha_inicio" class="form-control" value="{{ viernes_default }}">
+    </div>
+    <div class="col-md-3">
+      <button class="btn btn-outline-primary w-100">Descargar Excel</button>
+    </div>
+  </form>
+  <p class="small text-muted mt-2 mb-0">Cuando lo tengas lleno, ve a
+    <a href="{{ url_for('nomina') }}">Calcular nomina</a> para subirlo y obtener los importes.</p>
+</div>
+
+<div class="card">
+  <div class="card-header bg-white fw-bold text-navy">Semanas capturadas recientemente</div>
+  <table class="table table-sm mb-0 align-middle">
+    <thead>
+      <tr><th>Obra</th><th>Semana</th><th>Periodo</th><th class="text-center">Trabajadores</th><th class="text-center">Estatus</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for s in semanas %}
+      <tr>
+        <td>{{ s.obra }}</td>
+        <td>#{{ s.semana_num }} / {{ s.anio }}</td>
+        <td class="small text-muted">{{ s.fecha_inicio }} al {{ s.fecha_fin }}</td>
+        <td class="text-center">{{ s.capturados }}</td>
+        <td class="text-center">
+          {% if s.estatus == 'cerrada' %}<span class="badge text-bg-success">Cerrada</span>
+          {% else %}<span class="badge text-bg-secondary">Borrador</span>{% endif %}
+        </td>
+        <td class="text-end">
+          <a class="btn btn-sm btn-outline-primary"
+             href="{{ url_for('asistencia_captura', obra_id=s.obra_id, fecha_inicio=s.fecha_inicio) }}">Abrir</a>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="text-center text-muted py-3">Aun no se ha capturado ninguna semana.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

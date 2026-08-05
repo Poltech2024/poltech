@@ -24,12 +24,14 @@
 {% endif %}
 <div class="card">
   <table class="table table-sm mb-0">
-    <thead><tr><th>Obra</th><th>Proyecto</th><th>Contrato</th><th>Estado</th></tr></thead>
+    <thead><tr><th>Obra</th><th>Proyecto</th><th>Contrato</th><th>Estado</th>{% if current_user.rank >= GERENTE_RANK %}<th></th>{% endif %}</tr></thead>
     <tbody>
       {% for o in obras %}
-      <tr><td>{{ o.nombre }}</td><td>{{ o.proyecto }}</td><td>{{ o.contrato }}</td><td>{{ o.estado }}</td></tr>
+      <tr><td>{{ o.nombre }}</td><td>{{ o.proyecto }}</td><td>{{ o.contrato }}</td><td>{{ o.estado }}</td>
+        {% if current_user.rank >= GERENTE_RANK %}<td class="text-end"><a class="btn btn-sm btn-outline-primary" href="{{ url_for('obra_editar', obra_id=o.id) }}">Editar</a></td>{% endif %}
+      </tr>
       {% else %}
-      <tr><td colspan="4" class="text-center text-muted py-3">Aun no hay obras.</td></tr>
+      <tr><td colspan="5" class="text-center text-muted py-3">Aun no hay obras.</td></tr>
       {% endfor %}
     </tbody>
   </table>

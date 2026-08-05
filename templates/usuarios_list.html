@@ -1,12 +1,14 @@
 {% extends "base.html" %}
 {% block content %}
 <h3 class="mb-3">Usuarios y accesos</h3>
-<p class="text-muted small">Aqui el administrador crea las cuentas del personal y les asigna su rol (y obra, si aplica).</p>
+<p class="text-muted small">Solo el administrador gestiona usuarios. El usuario es el <b>correo</b> de la persona.
+Al superintendente y al residente asignales las obras que podran ver; si no tienen ninguna, no veran datos de obras.
+El administrador ve todo.</p>
 
 <div class="card p-3 mb-4">
   <h6 class="text-navy">Crear usuario</h6>
   <form method="post" class="row g-2">
-    <div class="col-md-2"><input name="username" class="form-control" placeholder="Usuario" required></div>
+    <div class="col-md-3"><input name="username" type="email" class="form-control" placeholder="Correo (usuario)" required></div>
     <div class="col-md-3"><input name="nombre" class="form-control" placeholder="Nombre completo" required></div>
     <div class="col-md-2"><input name="password" type="text" class="form-control" placeholder="Contrasena" required></div>
     <div class="col-md-2">
@@ -15,25 +17,36 @@
         {% for key, val in roles.items() %}<option value="{{ key }}">{{ val[0] }}</option>{% endfor %}
       </select>
     </div>
-    <div class="col-md-2">
-      <select name="obra_id" class="form-select">
-        <option value="">Obra (opcional)</option>
-        {% for o in obras %}<option value="{{ o.id }}">{{ o.nombre }}</option>{% endfor %}
-      </select>
+    <div class="col-md-2"><button class="btn btn-primary w-100">Crear</button></div>
+    <div class="col-12">
+      <label class="form-label small mb-1">Obras que podra ver (deja vacio si es administrador o aun no asignas):</label>
+      <div class="d-flex flex-wrap gap-3 border rounded p-2">
+        {% for o in obras %}
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" name="obras" value="{{ o.id }}" id="new{{ o.id }}">
+          <label class="form-check-label small" for="new{{ o.id }}">{{ o.nombre }}</label>
+        </div>
+        {% else %}<span class="text-muted small">Primero registra obras.</span>{% endfor %}
+      </div>
     </div>
-    <div class="col-md-1"><button class="btn btn-primary w-100">+</button></div>
   </form>
 </div>
 
 <div class="card">
   <div class="table-responsive">
   <table class="table table-sm align-middle mb-0">
-    <thead><tr><th>Usuario</th><th>Nombre</th><th>Rol y obra</th><th>Contrasena</th><th></th></tr></thead>
+    <thead><tr><th>Usuario (correo)</th><th>Nombre</th><th>Rol</th><th>Obras asignadas</th>
+      <th>Contrasena</th><th></th></tr></thead>
     <tbody>
       {% for u in usuarios %}
       <tr>
         <td><b>{{ u.username }}</b></td>
-        <td>{{ u.nombre }}</td>
+        <td style="min-width:180px">
+          <form method="post" action="{{ url_for('usuario_nombre', uid=u.id) }}" class="d-flex gap-1">
+            <input name="nombre" class="form-control form-control-sm" value="{{ u.nombre }}">
+            <button class="btn btn-sm btn-outline-primary" title="Guardar nombre">&#10003;</button>
+          </form>
+        </td>
         <td>
           <form method="post" action="{{ url_for('usuario_rol', uid=u.id) }}" class="d-flex gap-1">
             <select name="role" class="form-select form-select-sm" style="width:auto">
@@ -41,16 +54,32 @@
               <option value="{{ key }}" {{ 'selected' if u.role==key }}>{{ val[0] }}</option>
               {% endfor %}
             </select>
-            <select name="obra_id" class="form-select form-select-sm" style="width:auto">
-              <option value="">— sin obra —</option>
-              {% for o in obras %}<option value="{{ o.id }}" {{ 'selected' if u.obra_id==o.id }}>{{ o.nombre }}</option>{% endfor %}
-            </select>
             <button class="btn btn-sm btn-outline-primary">Guardar</button>
           </form>
         </td>
+        <td style="min-width:220px">
+          {% if u.role == 'admin' %}
+            <span class="badge bg-dark">Todas (administrador)</span>
+          {% else %}
+          <form method="post" action="{{ url_for('usuario_obras', uid=u.id) }}">
+            {% set mias = asignadas.get(u.id, []) %}
+            {% set ids = mias | map(attribute='id') | list %}
+            <div class="d-flex flex-wrap gap-2 mb-1">
+              {% for o in obras %}
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="obras" value="{{ o.id }}"
+                       id="u{{ u.id }}o{{ o.id }}" {{ 'checked' if o.id in ids }}>
+                <label class="form-check-label small" for="u{{ u.id }}o{{ o.id }}">{{ o.nombre }}</label>
+              </div>
+              {% endfor %}
+            </div>
+            <button class="btn btn-sm btn-outline-primary">Guardar obras</button>
+          </form>
+          {% endif %}
+        </td>
         <td>
           <form method="post" action="{{ url_for('usuario_password', uid=u.id) }}" class="d-flex gap-1">
-            <input name="nueva" class="form-control form-control-sm" style="width:130px" placeholder="Nueva">
+            <input name="nueva" class="form-control form-control-sm" style="width:120px" placeholder="Nueva">
             <button class="btn btn-sm btn-outline-secondary">Resetear</button>
           </form>
         </td>
@@ -60,7 +89,7 @@
                 onsubmit="return confirm('Eliminar a {{ u.username }}?')">
             <button class="btn btn-sm btn-outline-danger">Eliminar</button>
           </form>
-          {% else %}<span class="badge bg-secondary">Tú</span>{% endif %}
+          {% else %}<span class="badge bg-secondary">Tu</span>{% endif %}
         </td>
       </tr>
       {% endfor %}

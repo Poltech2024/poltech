@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h3 class="mb-0">Documentacion del empleado</h3>
+  <a class="btn btn-outline-secondary" href="{{ url_for('personal') }}">Volver a Personal</a>
+</div>
+
+<div class="card card-body mb-3">
+  <div class="row">
+    <div class="col-md-8">
+      <b>{{ emp.nombre }} {{ emp.primer_apellido }} {{ emp.segundo_apellido or '' }}</b>
+      &middot; Cedula {{ emp.cedula or '-' }} &middot; {{ emp.puesto or '-' }} / {{ emp.obra or '-' }}
+    </div>
+    <div class="col-md-4 text-md-end">
+      Estatus:
+      {% set s = emp.estatus_docs or 'Pendiente de carga' %}
+      {% set cls = 'secondary' if s=='Pendiente de carga' else ('warning' if s=='Informacion incompleta' else ('info' if s=='Carga completa' else 'success')) %}
+      <span class="badge bg-{{ cls }}">{{ s }}</span>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3">
+  {% for clave, etiqueta in tipos_doc %}
+  <div class="col-md-6">
+    <div class="card h-100">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start">
+          <div>
+            <h6 class="mb-1">{{ etiqueta }}
+              {% if clave in requeridos %}<span class="badge bg-light text-dark border">Requerido</span>{% endif %}
+            </h6>
+            {% set d = subidos.get(clave) %}
+            {% if d %}
+              <div class="small text-success">Subido el {{ d.subido_en }} por {{ d.subido_por }}</div>
+            {% else %}
+              <div class="small text-muted">Aun no se ha subido.</div>
+            {% endif %}
+          </div>
+          <div class="text-end">
+            {% if d %}
+              <a class="btn btn-sm btn-outline-primary" href="{{ url_for('documento_ver', doc_id=d.id) }}" target="_blank">Ver</a>
+              <form method="post" action="{{ url_for('documento_eliminar', emp_id=emp.id, tipo=clave) }}" class="d-inline"
+                    onsubmit="return confirm('Eliminar este documento?');">
+                <button class="btn btn-sm btn-outline-danger">Eliminar</button>
+              </form>
+            {% endif %}
+          </div>
+        </div>
+        <form method="post" action="{{ url_for('documento_subir', emp_id=emp.id) }}"
+              enctype="multipart/form-data" class="d-flex gap-2 mt-2">
+          <input type="hidden" name="tipo" value="{{ clave }}">
+          <input type="file" name="archivo" accept="application/pdf" class="form-control form-control-sm" required>
+          <button class="btn btn-sm btn-primary" title="Subir">+</button>
+        </form>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+{% if current_user.rank >= GERENTE_RANK %}
+<div class="card card-body mt-3">
+  <form method="post" action="{{ url_for('documentos_validar', emp_id=emp.id) }}">
+    <button class="btn btn-success">Validar documentacion</button>
+    <span class="small text-muted ms-2">Marca el proceso como Validado (requiere los documentos obligatorios).</span>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

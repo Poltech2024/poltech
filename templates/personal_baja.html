@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Dar de baja - Nomina Poltech{% endblock %}
+{% block content %}
+<h3 class="mb-1">Dar de baja</h3>
+<p class="text-muted">
+  <b>{{ emp.primer_apellido }} {{ emp.segundo_apellido or '' }} {{ emp.nombre }}</b>
+  &middot; {{ emp.cedula }} &middot; {{ emp.puesto }} &middot; {{ emp.obra }}
+</p>
+<div class="card p-4" style="max-width:640px">
+  <form method="post" class="row g-3">
+    <div class="col-md-6">
+      <label class="form-label">Fecha de baja (ultimo dia laborado) *</label>
+      <input name="fecha_baja" type="date" class="form-control" required>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">Motivo de la baja</label>
+      <select name="motivo_baja" class="form-select">
+        <option value="">Selecciona...</option>
+        {% for mo in motivos %}<option>{{ mo }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="col-12">
+      <div class="alert alert-warning small mb-0">Al dar de baja se marca al trabajador como
+      inactivo, se avisa por correo al administrador y al contador, y podras descargar el
+      <b>aviso de baja</b> para el IMSS.</div>
+    </div>
+    <div class="col-12 d-flex gap-2">
+      <button class="btn btn-danger">Dar de baja</button>
+      <a class="btn btn-outline-secondary" href="{{ url_for('personal') }}">Cancelar</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Editar obra - Nomina Poltech{% endblock %}
+{% block content %}
+<h3 class="mb-3">Editar obra</h3>
+<div class="card p-4" style="max-width:680px">
+  <form method="post" class="row g-3">
+    <div class="col-md-6">
+      <label class="form-label">Nombre de la obra</label>
+      <input name="nombre" class="form-control" value="{{ obra.nombre }}" required>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">Estado</label>
+      <select name="estado" class="form-select" required>
+        {% for e in estados %}<option {{ 'selected' if obra.estado==e }}>{{ e }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">Proyecto</label>
+      <input name="proyecto" class="form-control" value="{{ obra.proyecto or '' }}">
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">Contrato</label>
+      <input name="contrato" class="form-control" value="{{ obra.contrato or '' }}">
+    </div>
+    <div class="col-12 d-flex gap-2">
+      <button class="btn btn-primary">Guardar cambios</button>
+      <a class="btn btn-outline-secondary" href="{{ url_for('obras') }}">Cancelar</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

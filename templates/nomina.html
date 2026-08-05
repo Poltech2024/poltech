@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Calcular nomina - Nomina Poltech{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h3 class="mb-0">Calcular nomina</h3>
+  <span class="badge text-bg-light">Sube el Excel de asistencia lleno</span>
+</div>
+
+<div class="card p-3 mb-4 border-primary">
+  <h6 class="text-navy">Subir asistencia y calcular</h6>
+  <p class="small text-muted mb-2">Sube el Excel que descargaste (con codigos de asistencia, horas extra,
+  retardos y descuentos capturados). El sistema calcula sueldo, viaticos, horas extra e importes por trabajador.</p>
+  <form method="post" enctype="multipart/form-data" class="row g-2 align-items-end">
+    <div class="col-md-4">
+      <label class="form-label small mb-1">Obra</label>
+      <select name="obra_id" class="form-select" required>
+        <option value="">Selecciona una obra...</option>
+        {% for o in obras %}<option value="{{ o.id }}">{{ o.nombre }} &mdash; {{ o.estado }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label small mb-1">Semana</label>
+      <input type="date" name="fecha_inicio" class="form-control" value="{{ viernes_default }}">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label small mb-1">Archivo (.xlsx)</label>
+      <input type="file" name="archivo" accept=".xlsx" class="form-control" required>
+    </div>
+    <div class="col-md-2">
+      <button class="btn btn-primary w-100">Calcular</button>
+    </div>
+    <div class="col-12">
+      <div class="form-check mt-1">
+        <input class="form-check-input" type="checkbox" name="aplicar_retardos" id="aplret">
+        <label class="form-check-label small" for="aplret">
+          Aplicar descuento por retardos (cada 3 retardos = 1 dia). Marcalo solo en la <b>ultima nomina del mes</b>.
+        </label>
+      </div>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <div class="card-header bg-white fw-bold text-navy">Nominas calculadas recientemente</div>
+  <table class="table table-sm mb-0 align-middle">
+    <thead><tr><th>Obra</th><th>Semana</th><th>Periodo</th><th class="text-end">Total neto</th><th class="text-center">Estatus</th><th></th></tr></thead>
+    <tbody>
+      {% for n in recientes %}
+      <tr>
+        <td>{{ n.obra }}</td>
+        <td>#{{ n.semana_num }} / {{ n.anio }}</td>
+        <td class="small text-muted">{{ n.fecha_inicio }} al {{ n.fecha_fin }}</td>
+        <td class="text-end">{{ n.total_neto|money }}</td>
+        <td class="text-center">
+          {% if (n.estatus or 'pendiente') == 'autorizada' %}<span class="badge text-bg-success">Autorizada</span>
+          {% else %}<span class="badge text-bg-warning text-dark">Pendiente</span>{% endif %}
+        </td>
+        <td class="text-end">
+          <a class="btn btn-sm btn-outline-primary" href="{{ url_for('nomina_resultado', nomina_id=n.id) }}">Ver</a>
+          {% if current_user.rank >= GERENTE_RANK %}
+          <form method="post" action="{{ url_for('nomina_eliminar', nomina_id=n.id) }}" class="d-inline"
+                onsubmit="return confirm('Eliminar esta nomina? No se puede deshacer.');">
+            <button class="btn btn-sm btn-outline-danger">Borrar</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="text-center text-muted py-3">Aun no has calculado ninguna nomina.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

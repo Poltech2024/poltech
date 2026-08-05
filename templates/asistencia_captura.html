@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block title %}Captura de asistencia - Nomina Poltech{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-start mb-3 flex-wrap gap-2">
+  <div>
+    <h3 class="mb-1">Captura de asistencia</h3>
+    <div class="text-muted">
+      <b class="text-navy">{{ obra.nombre }}</b> &middot; {{ obra.estado }}
+      &nbsp;|&nbsp; Semana <b>#{{ semana_num }}</b> / {{ anio }}
+      &nbsp;|&nbsp; {{ viernes }} al {{ jueves }}
+    </div>
+  </div>
+  <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('asistencia_inicio') }}">&laquo; Volver</a>
+</div>
+
+<div class="d-flex gap-3 mb-2 small flex-wrap">
+  <span><span class="badge text-bg-success">A</span> Asistio</span>
+  <span><span class="badge text-bg-danger">F</span> Falta</span>
+  <span><span class="badge text-bg-warning text-dark">R</span> Retardo</span>
+  <span><span class="badge text-bg-secondary">D</span> Descanso</span>
+  <span class="text-muted">El domingo es visible pero no cuenta para la base de 6 dias.</span>
+</div>
+
+{% if not filas %}
+<div class="alert alert-warning">Esta obra no tiene trabajadores activos para capturar.</div>
+{% else %}
+<form method="post" action="{{ url_for('asistencia_captura') }}">
+  <input type="hidden" name="obra_id" value="{{ obra.id }}">
+  <input type="hidden" name="fecha_inicio" value="{{ viernes }}">
+
+  <div class="card">
+    <div class="table-responsive">
+      <table class="table table-sm table-bordered align-middle mb-0" style="font-size:.85rem;">
+        <thead>
+          <tr class="text-center">
+            <th style="min-width:70px;">Cedula</th>
+            <th class="text-start" style="min-width:190px;">Trabajador</th>
+            <th class="text-start" style="min-width:120px;">Puesto</th>
+            {% for k, etq in dias_semana %}
+            <th class="{% if k == 'd3' %}table-secondary{% endif %}">{{ etq }}<br><span class="fw-normal text-muted" style="font-size:.72rem;">{{ fechas[k] }}</span></th>
+            {% endfor %}
+            <th class="table-light">Dias</th>
+            <th class="table-light">Faltas</th>
+            <th class="table-light">Ret.</th>
+            <th style="min-width:70px;">HE 1.5</th>
+            <th style="min-width:70px;">HE 2.0</th>
+            <th style="min-width:150px;">Observaciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for f in filas %}
+          {% set e = f.emp %}
+          <tr data-emp="{{ e.id }}">
+            <td class="text-center text-muted">{{ e.cedula or '-' }}</td>
+            <td class="fw-semibold">{{ e.primer_apellido }} {{ e.segundo_apellido or '' }} {{ e.nombre }}</td>
+            <td class="small text-muted">{{ e.puesto }}</td>
+            {% for k, etq in dias_semana %}
+            <td class="p-1 {% if k == 'd3' %}table-secondary{% endif %}">
+              <select name="{{ k }}_{{ e.id }}" data-emp="{{ e.id }}" data-key="{{ k }}"
+                      class="form-select form-select-sm dia-select p-1 text-center border-0">
+                {% for code, label in codigos %}
+                <option value="{{ code }}" {% if f.cods[k] == code %}selected{% endif %}>{{ code }}</option>
+                {% endfor %}
+              </select>
+            </td>
+            {% endfor %}
+            <td class="text-center fw-bold text-navy" id="dias_{{ e.id }}">{{ f.dias }}</td>
+            <td class="text-center text-danger" id="faltas_{{ e.id }}">{{ f.faltas }}</td>
+            <td class="text-center text-warning" id="ret_{{ e.id }}">{{ f.retardos }}</td>
+            <td class="p-1"><input type="number" step="0.5" min="0" name="he150_{{ e.id }}"
+                   value="{{ '%g'|format(f.he150) }}" class="form-control form-control-sm text-end"></td>
+            <td class="p-1"><input type="number" step="0.5" min="0" name="he200_{{ e.id }}"
+                   value="{{ '%g'|format(f.he200) }}" class="form-control form-control-sm text-end"></td>
+            <td class="p-1"><input type="text" name="obs_{{ e.id }}" value="{{ f.obs }}"
+                   class="form-control form-control-sm" placeholder="&mdash;"></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="d-flex justify-content-between align-items-center mt-3">
+    <span class="small text-muted">{{ filas|length }} trabajador(es) &middot; {% if ya_existe %}editando semana ya guardada{% else %}semana nueva{% endif %}</span>
+    <button class="btn btn-primary px-4">Guardar asistencia</button>
+  </div>
+</form>
+
+<script>
+(function(){
+  var BASE = {{ dias_base|tojson }};   // dias que cuentan (sin domingo)
+  var COLORS = { A:"#d1e7dd", F:"#f8d7da", R:"#fff3cd", D:"#e2e3e5", "":"#ffffff" };
+
+  function pintar(sel){ sel.style.background = COLORS[sel.value] || "#fff"; }
+
+  function recalc(emp){
+    var dias=0, faltas=0, ret=0;
+    BASE.forEach(function(k){
+      var sel = document.querySelector('select[data-emp="'+emp+'"][data-key="'+k+'"]');
+      if(!sel) return;
+      var v = sel.value;
+      if(v==="A"||v==="R") dias++;
+      if(v==="F") faltas++;
+      if(v==="R") ret++;
+    });
+    document.getElementById("dias_"+emp).textContent = dias;
+    document.getElementById("faltas_"+emp).textContent = faltas;
+    document.getElementById("ret_"+emp).textContent = ret;
+  }
+
+  document.querySelectorAll(".dia-select").forEach(function(sel){
+    pintar(sel);
+    sel.addEventListener("change", function(){
+      pintar(sel);
+      recalc(sel.getAttribute("data-emp"));
+    });
+  });
+})();
+</script>
+{% endif %}
+{% endblock %}

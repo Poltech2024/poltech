@@ -1,0 +1,72 @@
+==========================================================
+   NOMINA POLTECH  v1.15  -  COMO CORRERLO HOY
+==========================================================
+
+Este paquete trae el SISTEMA COMPLETO (ya con todo lo de las
+versiones 1.1 a 1.4.1). No trae base de datos: al arrancar por
+primera vez crea una limpia con el usuario administrador.
+
+-----------------------------------------------------------
+RECOMENDADO PARA TU NOMINA REAL DE HOY: correrlo LOCAL en tu
+computadora Windows (es lo mas seguro; ver la nota de Render abajo).
+-----------------------------------------------------------
+
+PASO A PASO (LOCAL)
+-------------------
+1. Descomprime este zip en una carpeta, por ejemplo:  C:\NominaPoltech
+2. Necesitas Python 3 instalado (si no lo tienes: python.org, marca
+   "Add Python to PATH" al instalar).
+3. Abre una terminal DENTRO de esa carpeta:
+   - En el Explorador de archivos, entra a la carpeta, haz clic en la
+     barra de direcciones, escribe  cmd  y presiona Enter.
+4. Solo la primera vez, instala lo necesario:
+       py -m pip install -r requirements.txt
+5. Arranca el sistema:
+       py app.py
+6. Abre tu navegador en:
+       http://localhost:5000
+7. Entra con:
+       usuario:  admin
+       clave:    cambiar123
+   (luego cambiala en el boton "Contrasena").
+
+8. Carga tu taller real:
+   a) OBRAS: registra tu obra (el taller).
+   b) CATALOGO DE SUELDOS: registra los puestos con su sueldo semanal
+      y viaticos semanales.
+   c) PERSONAL: da de alta a tus trabajadores (o usa "Carga masiva"
+      con la plantilla de Excel). Captura tambien su CUENTA BANCARIA
+      para que salga en la nomina.
+
+9. ASISTENCIA SEMANAL > "Descargar Excel" (elige la obra y la semana).
+10. Llena el Excel: asistencia (A/F/R/V/D), horas extra por dia + TIPO
+    y VALOR, retardos, descuentos y baja si aplica.
+11. CALCULAR NOMINA > sube el Excel > revisa la tabla > "Descargar Excel"
+    para tener la nomina con importes y datos de banco para el pago.
+
+Para DETENER el sistema: en la terminal, Ctrl + C.
+
+SI OLVIDAS LA CONTRASENA DEL ADMIN
+----------------------------------
+En la carpeta del proyecto, corre (cambia TU_NUEVA_CLAVE):
+  py -c "import sqlite3; from werkzeug.security import generate_password_hash as h; c=sqlite3.connect('poltech.db'); c.execute(\"UPDATE users SET password_hash=? WHERE username='admin'\", (h('TU_NUEVA_CLAVE'),)); c.commit(); print('Listo')"
+
+-----------------------------------------------------------
+SUBIRLO A LA PAGINA (Render / acerospoltech.com)  - opcional
+-----------------------------------------------------------
+- Copia app.py y la carpeta templates/ a tu repositorio local
+  (github.com/Poltech2024/poltech), luego:
+      git add .
+      git commit -m "v1.15 nomina"
+      git push
+  Render redepliega solo.
+
+- IMPORTANTE: en Render plan FREE la base de datos SQLite se REINICIA
+  en cada despliegue (no hay disco permanente). Es decir, los
+  trabajadores que captures se borrarian al volver a desplegar.
+  Por eso, para tu nomina REAL de HOY corre el sistema LOCAL.
+  Para dejarlo en produccion de forma permanente hay que agregarle un
+  disco persistente en Render o pasar a una base Postgres; eso lo
+  vemos con calma en la proxima sesion.
+
+NOTA: nada de esto toca poltech.mx. Es tu sistema aparte.

@@ -2,15 +2,28 @@
 {% block content %}
 <h3 class="mb-3">Cuentas bancarias</h3>
 <p class="text-muted small">Las cuentas se registran al dar de alta al empleado. No se permiten numeros duplicados.</p>
+
+<form method="get" class="row g-2 mb-3" style="max-width:520px">
+  <div class="col-9"><input name="q" class="form-control form-control-sm"
+      placeholder="Buscar por empleado, banco o numero" value="{{ q }}"></div>
+  <div class="col-3 d-grid"><button class="btn btn-sm btn-primary">Buscar</button></div>
+</form>
+
 <div class="card">
-  <table class="table table-sm mb-0">
-    <thead><tr><th>Empleado</th><th>Institucion</th><th>Tipo</th><th>Numero</th></tr></thead>
+  <table class="table table-sm mb-0 align-middle">
+    <thead><tr><th>Empleado</th><th>Institucion</th><th>Tipo</th><th>Numero</th>
+      {% if current_user.rank >= ADMIN_RANK %}<th></th>{% endif %}</tr></thead>
     <tbody>
       {% for c in cuentas %}
       <tr><td>{{ c.nombre }} {{ c.primer_apellido }} {{ c.segundo_apellido or '' }}</td>
-        <td>{{ c.institucion }}</td><td>{{ c.tipo_cuenta }}</td><td>{{ c.numero }}</td></tr>
+        <td>{{ c.institucion }}</td><td>{{ c.tipo_cuenta }}</td><td>{{ c.numero }}</td>
+        {% if current_user.rank >= ADMIN_RANK %}
+        <td><a class="btn btn-sm btn-outline-secondary py-0 px-2"
+               href="{{ url_for('cuenta_editar', cid=c.id) }}">Editar</a></td>
+        {% endif %}
+      </tr>
       {% else %}
-      <tr><td colspan="4" class="text-center text-muted py-3">Aun no hay cuentas registradas.</td></tr>
+      <tr><td colspan="5" class="text-center text-muted py-3">No hay cuentas con ese criterio.</td></tr>
       {% endfor %}
     </tbody>
   </table>
