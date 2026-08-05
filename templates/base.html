@@ -29,8 +29,12 @@
     .table-sticky-first tfoot td:first-child{ background-color:#f8f9fa; }
     .sidebar a{ color:var(--navy); text-decoration:none; display:block; padding:.5rem .75rem; border-radius:.4rem; font-weight:600; }
     .sidebar a:hover, .sidebar a.active{ background:#fff; color:var(--azul); }
-    .sidebar .group-label{ font-size:.72rem; text-transform:uppercase; letter-spacing:.04em; color:#6B7280; font-weight:700; margin:1rem 0 .25rem .75rem; }
+    .sidebar .group-label{ font-size:.72rem; text-transform:uppercase; letter-spacing:.04em; color:#6B7280; font-weight:700; margin:1rem 0 .25rem .75rem; cursor:pointer; user-select:none; display:flex; align-items:center; justify-content:space-between; padding-right:.75rem; }
     .sidebar .group-label:first-child{ margin-top:.25rem; }
+    .sidebar .group-label .chevron{ font-size:.85rem; transition:transform .15s; }
+    .sidebar .group-label.open .chevron{ transform:rotate(90deg); }
+    .sidebar .group-links{ display:none; }
+    .sidebar .group-links.open{ display:block; }
     h1,h2,h3{ color:var(--navy); }
   </style>
 </head>
@@ -58,22 +62,28 @@
     <div class="col-lg-2 mb-3 sidebar">
       <a href="{{ url_for('dashboard') }}">Inicio</a>
 
-      <div class="group-label">Personal</div>
-      <a href="{{ url_for('personal') }}">Personal</a>
-      <a href="{{ url_for('bajas') }}">Bajas</a>
-      <a href="{{ url_for('contratos') }}">Contratos</a>
-      <a href="{{ url_for('cuentas') }}">Cuentas bancarias</a>
-      <a href="{{ url_for('apimarket_tool') }}">API market</a>
+      <div class="group-label" data-target="grupo-personal">Personal <span class="chevron">&rsaquo;</span></div>
+      <div class="group-links" id="grupo-personal">
+        <a href="{{ url_for('personal') }}">Personal</a>
+        <a href="{{ url_for('bajas') }}">Bajas</a>
+        <a href="{{ url_for('contratos') }}">Contratos</a>
+        <a href="{{ url_for('cuentas') }}">Cuentas bancarias</a>
+        <a href="{{ url_for('apimarket_tool') }}">API market</a>
+      </div>
 
-      <div class="group-label">Nomina</div>
-      <a href="{{ url_for('asistencia_inicio') }}">Asistencia semanal</a>
-      <a href="{{ url_for('nomina') }}">Calcular nomina</a>
+      <div class="group-label" data-target="grupo-nomina">Nomina <span class="chevron">&rsaquo;</span></div>
+      <div class="group-links" id="grupo-nomina">
+        <a href="{{ url_for('asistencia_inicio') }}">Asistencia semanal</a>
+        <a href="{{ url_for('nomina') }}">Calcular nomina</a>
+      </div>
 
-      <div class="group-label">Configuracion</div>
-      <a href="{{ url_for('obras') }}">Obras</a>
-      <a href="{{ url_for('catalogo') }}">Catalogo de sueldos</a>
-      {% if current_user.rank >= 100 %}<a href="{{ url_for('usuarios') }}">Usuarios</a>{% endif %}
-      {% if current_user.rank >= 100 %}<a href="{{ url_for('parametros') }}">Parametros</a>{% endif %}
+      <div class="group-label" data-target="grupo-config">Configuracion <span class="chevron">&rsaquo;</span></div>
+      <div class="group-links" id="grupo-config">
+        <a href="{{ url_for('obras') }}">Obras</a>
+        <a href="{{ url_for('catalogo') }}">Catalogo de sueldos</a>
+        {% if current_user.rank >= 100 %}<a href="{{ url_for('usuarios') }}">Usuarios</a>{% endif %}
+        {% if current_user.rank >= 100 %}<a href="{{ url_for('parametros') }}">Parametros</a>{% endif %}
+      </div>
 
       <div class="text-muted small mt-3 ps-2">Version {{ APP_VERSION }}</div>
     </div>
@@ -88,5 +98,14 @@
     </div>
   </div>
 </div>
+<script>
+document.querySelectorAll('.sidebar .group-label').forEach(function (label) {
+  label.addEventListener('click', function () {
+    var target = document.getElementById(label.dataset.target);
+    label.classList.toggle('open');
+    target.classList.toggle('open');
+  });
+});
+</script>
 </body>
 </html>
