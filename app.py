@@ -27,7 +27,7 @@ from flask import (Flask, request, redirect, url_for, session,
 from werkzeug.security import generate_password_hash, check_password_hash
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(APP_DIR, "poltech.db")
+DB_PATH = os.environ.get("DB_PATH", os.path.join(APP_DIR, "poltech.db"))
 
 APP_VERSION = "1.15"   # version del sistema (visible en el menu)
 
