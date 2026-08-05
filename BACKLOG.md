@@ -9,6 +9,21 @@ Disco persistente + DB_PATH para que la base de datos ya no se borre en cada dep
 Menu agrupado (Personal / Nomina / Configuracion), quitar color dorado sin marca,
 columna fija en tabla de nomina, acentos en Aviso de baja y Comprobante de vigencia.
 
+## Correcciones (pendiente - para cerrar la Fase A)
+- Menu lateral desplegable: hoy el menu agrupado (Personal / Nomina / Configuracion)
+  siempre muestra todos los enlaces. Falta que cada grupo se pueda colapsar/expandir
+  (acordeon), para que no se vea todo junto todo el tiempo.
+
+## Pendientes del documento "Pendientes_Nomina_Poltech_4.docx" (30-jul-2026)
+- Configurar SMTP en Render: faltan las variables de correo para que SALGAN los avisos
+  (baja al admin/contador, nomina liberada). El correo del contador ya esta cargado.
+  Estado: pendiente de configuracion (no de codigo).
+- Baja / reingreso por NSS: permitir reingresar a un trabajador dado de baja conservando
+  la misma cedula.
+- Reportes (backlog, ya identificados antes): retardos por obra, horas extra, fechas de
+  ingreso (aguinaldos), nomina y bitacora exportables.
+- Obras y Catalogo: se queda restringido de superintendente hacia arriba (decidido, sin cambio).
+
 ## Fase B - Migrar SQLite a PostgreSQL (pendiente)
 Solucion definitiva de persistencia (mas robusta que el disco de Render).
 
