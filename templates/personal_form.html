@@ -59,7 +59,7 @@
         <option value="">Primero elige la obra...</option>
         {% for p in puestos %}
         <option value="{{ p.id }}" data-obra="{{ p.obra_id }}" data-viat="{{ p.viaticos_semanales }}" {{ 'selected' if datos.get('puesto_id')==(p.id|string) }}>
-          {{ p.puesto }} ({{ p.sueldo_semanal|money }}/sem)
+          {{ p.puesto }} (Sueldo {{ p.sueldo_semanal|money }}/sem, Viaticos {{ p.viaticos_semanales|money }}/sem)
         </option>
         {% endfor %}
       </select></div>

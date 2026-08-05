@@ -114,10 +114,10 @@ def siguiente_cedula(db):
 
 
 def resolver_puesto(db, obra_nom, puesto_nom):
-    """Devuelve el id del puesto que coincide con una obra + categoria del catalogo,
-    o None si esa combinacion no existe (no se inventan obras)."""
+    """Devuelve el id del puesto y el estado de su obra, coincidiendo con obra + categoria
+    del catalogo, o None si esa combinacion no existe (no se inventan obras)."""
     return db.execute(
-        "SELECT p.id FROM puestos p JOIN obras o ON o.id=p.obra_id "
+        "SELECT p.id, o.estado FROM puestos p JOIN obras o ON o.id=p.obra_id "
         "WHERE lower(o.nombre)=lower(?) AND lower(p.nombre)=lower(?)",
         ((obra_nom or "").strip(), (puesto_nom or "").strip())).fetchone()
 
@@ -1720,6 +1720,7 @@ COLS_CARGA = ["NOMBRE(S)", "PRIMER APELLIDO", "SEGUNDO APELLIDO", "CURP", "RFC",
 @app.route("/personal/plantilla")
 @login_required
 def personal_plantilla():
+    db = get_db()
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Trabajadores"
@@ -1734,6 +1735,88 @@ def personal_plantilla():
         c.fill = PatternFill("solid", fgColor="16233C")
     for i in range(1, len(COLS_CARGA) + 1):
         ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = 20
+
+    # -----------------------------------------------------------------
+    # Hoja oculta "Listas": aqui viven los valores de los menus desplegables
+    # (Sexo, Obra, Banco, Tipo de cuenta) y, para cada obra, la lista de sus
+    # puestos (para que el desplegable de Puesto dependa de la Obra elegida).
+    # -----------------------------------------------------------------
+    from openpyxl.utils import get_column_letter
+    from openpyxl.workbook.defined_name import DefinedName
+    from openpyxl.worksheet.datavalidation import DataValidation
+
+    obras_l = obras_visibles(db)
+    lst = wb.create_sheet("Listas")
+    lst.sheet_state = "hidden"
+
+    def nombrar_rango(nombre, ref):
+        wb.defined_names[nombre] = DefinedName(nombre, attr_text=ref)
+
+    # Columna A: nombre de la obra. Columna B: clave interna (para ubicar sus puestos).
+    for idx, o in enumerate(obras_l, start=1):
+        lst.cell(row=idx, column=1, value=o["nombre"])
+        lst.cell(row=idx, column=2, value=f"OBRA_{o['id']}")
+    if obras_l:
+        nombrar_rango("ListaObras", f"Listas!$A$1:$A${len(obras_l)}")
+        nombrar_rango("MapaObraKey", f"Listas!$A$1:$B${len(obras_l)}")
+
+    # Columna D: bancos. Columna E: tipo de cuenta.
+    for idx, b in enumerate(BANCOS, start=1):
+        lst.cell(row=idx, column=4, value=b)
+    nombrar_rango("ListaBancos", f"Listas!$D$1:$D${len(BANCOS)}")
+    for idx, t in enumerate(TIPOS_CUENTA, start=1):
+        lst.cell(row=idx, column=5, value=t)
+    nombrar_rango("ListaTipoCuenta", f"Listas!$E$1:$E${len(TIPOS_CUENTA)}")
+
+    # A partir de la columna G, una columna por obra con sus puestos.
+    col = 7
+    for o in obras_l:
+        filas_puesto = db.execute(
+            "SELECT nombre FROM puestos WHERE obra_id=? ORDER BY nombre", (o["id"],)).fetchall()
+        nombres_puesto = [r["nombre"] for r in filas_puesto]
+        if not nombres_puesto:
+            continue
+        for r, pnom in enumerate(nombres_puesto, start=1):
+            lst.cell(row=r, column=col, value=pnom)
+        letra = get_column_letter(col)
+        nombrar_rango(f"OBRA_{o['id']}", f"Listas!${letra}$1:${letra}${len(nombres_puesto)}")
+        col += 1
+
+    # -----------------------------------------------------------------
+    # Menus desplegables en la hoja "Trabajadores"
+    # -----------------------------------------------------------------
+    ultima_fila = 500  # deja espacio para pegar/escribir muchos trabajadores
+
+    dv_sexo = DataValidation(type="list", formula1='"H,M"', allow_blank=True,
+                             showErrorMessage=True, errorTitle="Valor no valido",
+                             error="Escribe H (hombre) o M (mujer).")
+    ws.add_data_validation(dv_sexo)
+    dv_sexo.add(f"H2:H{ultima_fila}")
+
+    if obras_l:
+        dv_obra = DataValidation(type="list", formula1="ListaObras", allow_blank=True,
+                                  showErrorMessage=True, errorTitle="Obra no valida",
+                                  error="Elige una obra de la lista (ya dada de alta en Obras).")
+        ws.add_data_validation(dv_obra)
+        dv_obra.add(f"J2:J{ultima_fila}")
+
+        # El Puesto depende de la Obra escrita en la misma fila (columna J).
+        dv_puesto = DataValidation(
+            type="list", formula1="INDIRECT(VLOOKUP($J2,MapaObraKey,2,0))",
+            allow_blank=True, showErrorMessage=False)
+        ws.add_data_validation(dv_puesto)
+        dv_puesto.add(f"K2:K{ultima_fila}")
+
+    dv_banco = DataValidation(type="list", formula1="ListaBancos", allow_blank=True,
+                              showErrorMessage=False)
+    ws.add_data_validation(dv_banco)
+    dv_banco.add(f"O2:O{ultima_fila}")
+
+    dv_tipo = DataValidation(type="list", formula1="ListaTipoCuenta", allow_blank=True,
+                             showErrorMessage=False)
+    ws.add_data_validation(dv_tipo)
+    dv_tipo.add(f"P2:P{ultima_fila}")
+
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
@@ -1767,12 +1850,20 @@ def personal_carga():
              falta, salario, infonavit, banco, tipo_cta, num_cta, obs) = vals
 
             def txt(x): return "" if x is None else str(x).strip()
+            def fecha_txt(x):
+                """Excel a veces entrega la fecha como datetime; hay que formatearla
+                como AAAA-MM-DD en vez de str() (que deja la hora pegada, ej. '00:00:00')."""
+                if isinstance(x, (datetime, date)):
+                    return x.strftime("%Y-%m-%d")
+                return txt(x)
             nombre, ap1, ap2 = titulo(txt(nombre)), titulo(txt(ap1)), titulo(txt(ap2))
             curp = txt(curp).upper()
             nss = solo_digitos(txt(nss))
             # el NSS a veces llega como numero con ".0"
             if nss.endswith(".0"):
                 nss = nss[:-2]
+            fnac = fecha_txt(fnac)
+            falta = fecha_txt(falta)
 
             errs = []
             if not nombre: errs.append("nombre vacio")
@@ -1780,7 +1871,7 @@ def personal_carga():
             if not curp_valida(curp): errs.append("CURP invalida")
             if not nss: errs.append("NSS vacio")
             elif not nss_valido(nss): errs.append("NSS invalido")
-            if not txt(falta): errs.append("fecha de alta vacia")
+            if not falta: errs.append("fecha de alta vacia")
             puesto = resolver_puesto(db, obra_nom, puesto_nom)
             if not puesto:
                 errs.append(f"la obra/puesto '{txt(obra_nom)} / {txt(puesto_nom)}' no existe en el catalogo")
@@ -1792,6 +1883,14 @@ def personal_carga():
                 errores.append(f"Fila {i}: " + "; ".join(errs))
                 continue
 
+            # Si no viene el salario de alta, se sugiere el minimo del estado de la obra + extra
+            # (igual que en el alta individual), en vez de dejarlo en $0.
+            salario_txt = txt(salario)
+            if salario_txt:
+                salario_final = float(salario_txt)
+            else:
+                salario_final = propuesta_salario_alta(db, puesto["estado"])
+
             cedula = siguiente_cedula(db)
             cur = db.execute(
                 """INSERT INTO empleados
@@ -1801,8 +1900,8 @@ def personal_carga():
                     observaciones, estatus_docs)
                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (cedula, nombre, ap1, ap2, curp, txt(rfc).upper(), txt(cp), nss,
-                 txt(sexo).upper()[:1], txt(fnac), puesto["id"], txt(falta),
-                 date.today().isoformat(), float(salario or 0), float(infonavit or 0),
+                 txt(sexo).upper()[:1], fnac, puesto["id"], falta,
+                 date.today().isoformat(), salario_final, float(infonavit or 0),
                  0, "", txt(obs), "Pendiente de carga"))
             emp_id = cur.lastrowid
             creados += 1
