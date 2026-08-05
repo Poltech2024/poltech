@@ -1712,8 +1712,8 @@ def personal_nuevo():
 # Carga masiva de trabajadores (por Excel)
 # ---------------------------------------------------------------------------
 COLS_CARGA = ["NOMBRE(S)", "PRIMER APELLIDO", "SEGUNDO APELLIDO", "CURP", "RFC",
-              "CP FISCAL", "NSS", "SEXO (H/M)", "FECHA NACIMIENTO (AAAA-MM-DD)",
-              "OBRA", "PUESTO", "FECHA ALTA (AAAA-MM-DD)", "SALARIO ALTA IMSS",
+              "CP FISCAL", "NSS", "SEXO (H/M)", "FECHA NACIMIENTO (DD-MM-AAAA)",
+              "OBRA", "PUESTO", "FECHA ALTA (DD-MM-AAAA)", "SALARIO ALTA IMSS",
               "INFONAVIT SEMANAL", "BANCO", "TIPO DE CUENTA", "NUMERO DE CUENTA",
               "OBSERVACIONES"]
 
@@ -1726,8 +1726,8 @@ def personal_plantilla():
     ws.title = "Trabajadores"
     ws.append(COLS_CARGA)
     ws.append(["JUAN", "PEREZ", "LOPEZ", "PELJ800101HDFRPN09", "PELJ800101AB1",
-               "54000", "12345678903", "H", "1980-01-01", "Torre Reforma",
-               "Soldador", "2026-07-28", "3000", "0", "BBVA Mexico",
+               "54000", "12345678903", "H", "01-01-1980", "Torre Reforma",
+               "Soldador", "28-07-2026", "3000", "0", "BBVA Mexico",
                "CLABE interbancaria", "012180001234567890", ""])
     from openpyxl.styles import Font, PatternFill
     for c in ws[1]:
@@ -1851,11 +1851,27 @@ def personal_carga():
 
             def txt(x): return "" if x is None else str(x).strip()
             def fecha_txt(x):
-                """Excel a veces entrega la fecha como datetime; hay que formatearla
-                como AAAA-MM-DD en vez de str() (que deja la hora pegada, ej. '00:00:00')."""
+                """Convierte la fecha a AAAA-MM-DD (formato interno) sin importar como
+                haya llegado: fecha nativa de Excel, DD-MM-AAAA o DD/MM/AAAA (formato
+                mexicano, el que se pide en la plantilla) o ya en AAAA-MM-DD.
+                Si no se reconoce el formato, se regresa tal cual para que la fila
+                se marque con error en vez de guardar una fecha incorrecta."""
                 if isinstance(x, (datetime, date)):
                     return x.strftime("%Y-%m-%d")
-                return txt(x)
+                s = txt(x)
+                if not s:
+                    return ""
+                if re.fullmatch(r"\d{4}-\d{2}-\d{2}", s):
+                    return s
+                m = re.fullmatch(r"(\d{1,2})[/-](\d{1,2})[/-](\d{4})", s)
+                if m:
+                    d, mo, y = (int(g) for g in m.groups())
+                    try:
+                        return date(y, mo, d).isoformat()
+                    except ValueError:
+                        return s
+                return s
+            def fecha_valida(s): return bool(re.fullmatch(r"\d{4}-\d{2}-\d{2}", s or ""))
             nombre, ap1, ap2 = titulo(txt(nombre)), titulo(txt(ap1)), titulo(txt(ap2))
             curp = txt(curp).upper()
             nss = solo_digitos(txt(nss))
@@ -1864,6 +1880,7 @@ def personal_carga():
                 nss = nss[:-2]
             fnac = fecha_txt(fnac)
             falta = fecha_txt(falta)
+            nombre_completo = " ".join(x for x in [nombre, ap1, ap2] if x) or "sin nombre"
 
             errs = []
             if not nombre: errs.append("nombre vacio")
@@ -1871,7 +1888,12 @@ def personal_carga():
             if not curp_valida(curp): errs.append("CURP invalida")
             if not nss: errs.append("NSS vacio")
             elif not nss_valido(nss): errs.append("NSS invalido")
-            if not falta: errs.append("fecha de alta vacia")
+            if fnac and not fecha_valida(fnac):
+                errs.append(f"fecha de nacimiento '{fnac}' no reconocida (usa DD-MM-AAAA)")
+            if not falta:
+                errs.append("fecha de alta vacia")
+            elif not fecha_valida(falta):
+                errs.append(f"fecha de alta '{falta}' no reconocida (usa DD-MM-AAAA)")
             puesto = resolver_puesto(db, obra_nom, puesto_nom)
             if not puesto:
                 errs.append(f"la obra/puesto '{txt(obra_nom)} / {txt(puesto_nom)}' no existe en el catalogo")
@@ -1880,7 +1902,7 @@ def personal_carga():
                 errs.append("ya existe un trabajador con ese NSS")
 
             if errs:
-                errores.append(f"Fila {i}: " + "; ".join(errs))
+                errores.append(f"Fila {i} ({nombre_completo}): " + "; ".join(errs))
                 continue
 
             # Si no viene el salario de alta, se sugiere el minimo del estado de la obra + extra
