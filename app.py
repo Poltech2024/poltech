@@ -1448,6 +1448,35 @@ def personal():
                                     "desde": desde, "hasta": hasta})
 
 
+@app.route("/personal/rellenar-fecha-solicitud", methods=["POST"])
+@min_rank(ADMIN_RANK)
+def personal_rellenar_fecha_solicitud():
+    """Herramienta de una sola vez: a los trabajadores que ya tienen fecha de alta
+    pero les falta la fecha de solicitud de alta IMSS (comun en los subidos por
+    carga masiva antes de este arreglo), se las calcula: alta - 5 dias.
+    No pisa ninguna fecha de solicitud que ya este capturada."""
+    db = get_db()
+    filas = db.execute(
+        "SELECT id, fecha_alta FROM empleados "
+        "WHERE (fecha_solicitud IS NULL OR fecha_solicitud='') AND fecha_alta IS NOT NULL "
+        "AND fecha_alta<>''").fetchall()
+    actualizados = 0
+    for r in filas:
+        try:
+            fs = (date.fromisoformat(str(r["fecha_alta"])[:10]) - timedelta(days=5)).isoformat()
+        except ValueError:
+            continue
+        db.execute("UPDATE empleados SET fecha_solicitud=? WHERE id=?", (fs, r["id"]))
+        actualizados += 1
+    db.commit()
+    registrar_bitacora(db, "Rellenar fecha de solicitud IMSS",
+                        f"{actualizados} trabajador(es) actualizados (alta - 5 dias)")
+    db.commit()
+    flash(f"Se calculo la fecha de solicitud IMSS para {actualizados} trabajador(es) "
+          "que no la tenian.", "success")
+    return redirect(url_for("personal"))
+
+
 @app.route("/personal/<int:emp_id>/editar", methods=["GET", "POST"])
 @min_rank(ADMIN_RANK)
 def personal_editar(emp_id):
@@ -1506,19 +1535,26 @@ def personal_editar(emp_id):
                                    estatus_docs=ESTATUS_DOCS, datos=datos,
                                    editar=True, emp_id=emp_id)
 
+        # Si no viene la fecha de solicitud (el JS no corrio), se calcula: alta - 5 dias.
+        fecha_sol = f.get("fecha_solicitud", "").strip()
+        if not fecha_sol and f.get("fecha_alta"):
+            try:
+                fecha_sol = (date.fromisoformat(f.get("fecha_alta")) - timedelta(days=5)).isoformat()
+            except ValueError:
+                fecha_sol = ""
+
         db.execute(
             """UPDATE empleados SET nombre=?, primer_apellido=?, segundo_apellido=?,
                curp=?, rfc=?, cp_fiscal=?, nss=?, sexo=?, fecha_nacimiento=?,
                puesto_id=?, fecha_alta=?, fecha_solicitud=?, importe_alta_imss=?,
-               infonavit_monto=?, viaticos_semanales=?, bono_semanal=?,
+               infonavit_monto=?, bono_semanal=?,
                nss_generico=?, autoriza_nss_generico=?,
                estatus_docs=?, observaciones=? WHERE id=?""",
             (nombre, ap1, titulo(f.get("segundo_apellido", "").strip()), curp,
              f.get("rfc", "").strip().upper(), f.get("cp_fiscal", "").strip(),
              nss, f.get("sexo", ""), f.get("fecha_nacimiento", ""),
-             f.get("puesto_id"), f.get("fecha_alta"), f.get("fecha_solicitud", ""),
+             f.get("puesto_id"), f.get("fecha_alta"), fecha_sol,
              float(f.get("importe_alta_imss") or 0), float(f.get("infonavit_monto") or 0),
-             (float(f.get("viaticos_semanales")) if (f.get("viaticos_semanales") or "").strip() != "" else None),
              float(f.get("bono_semanal") or 0),
              pensionado, autoriza_pension,
              f.get("estatus_docs", "Pendiente de carga"),
@@ -1742,23 +1778,30 @@ def personal_nuevo():
                                    propuesta_salario=propuesta_salario,
                                    estados=ESTADOS, tipos=TIPOS_CUENTA, bancos=BANCOS, datos=f)
 
+        # Si no viene la fecha de solicitud (el JS no corrio), se calcula: alta - 5 dias.
+        fecha_sol = f.get("fecha_solicitud", "").strip()
+        if not fecha_sol and f.get("fecha_alta"):
+            try:
+                fecha_sol = (date.fromisoformat(f.get("fecha_alta")) - timedelta(days=5)).isoformat()
+            except ValueError:
+                fecha_sol = ""
+
         cedula = siguiente_cedula(db)
         observaciones = f.get("observaciones", "").strip()
         cur = db.execute(
             """INSERT INTO empleados
                (cedula, nombre, primer_apellido, segundo_apellido, curp, rfc, cp_fiscal,
                 nss, sexo, fecha_nacimiento, puesto_id, fecha_alta, fecha_solicitud,
-                fecha_registro, importe_alta_imss, infonavit_monto, viaticos_semanales,
+                fecha_registro, importe_alta_imss, infonavit_monto,
                 bono_semanal, exime_docs, autoriza_tercero, nss_generico,
                 autoriza_nss_generico, observaciones, estatus_docs)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (cedula, nombre, ap1, ap2, curp,
              f.get("rfc", "").strip().upper(), f.get("cp_fiscal", "").strip(),
              nss_norm, sexo, fecha_nac, f.get("puesto_id"),
-             f.get("fecha_alta"), f.get("fecha_solicitud", ""),
+             f.get("fecha_alta"), fecha_sol,
              date.today().isoformat(), float(f.get("importe_alta_imss") or 0),
              float(f.get("infonavit_monto") or 0),
-             (float(f.get("viaticos_semanales")) if (f.get("viaticos_semanales") or "").strip() != "" else None),
              float(f.get("bono_semanal") or 0),
              exime, autoriza, pensionado, autoriza_pension,
              observaciones, "Pendiente de carga"),
@@ -1973,16 +2016,20 @@ def personal_carga():
             else:
                 salario_final = propuesta_salario_alta(db, puesto["estado"])
 
+            # Fecha de solicitud de alta IMSS: 5 dias antes de la fecha de alta (igual
+            # que en el alta individual; en la carga masiva no habia forma de calcularla).
+            fecha_solicitud_calc = (date.fromisoformat(falta) - timedelta(days=5)).isoformat()
+
             cedula = siguiente_cedula(db)
             cur = db.execute(
                 """INSERT INTO empleados
                    (cedula, nombre, primer_apellido, segundo_apellido, curp, rfc, cp_fiscal,
-                    nss, sexo, fecha_nacimiento, puesto_id, fecha_alta, fecha_registro,
-                    importe_alta_imss, infonavit_monto, exime_docs, autoriza_tercero,
-                    observaciones, estatus_docs)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    nss, sexo, fecha_nacimiento, puesto_id, fecha_alta, fecha_solicitud,
+                    fecha_registro, importe_alta_imss, infonavit_monto, exime_docs,
+                    autoriza_tercero, observaciones, estatus_docs)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (cedula, nombre, ap1, ap2, curp, txt(rfc).upper(), txt(cp), nss,
-                 txt(sexo).upper()[:1], fnac, puesto["id"], falta,
+                 txt(sexo).upper()[:1], fnac, puesto["id"], falta, fecha_solicitud_calc,
                  date.today().isoformat(), salario_final, float(infonavit or 0),
                  0, "", txt(obs), "Pendiente de carga"))
             emp_id = cur.lastrowid
@@ -2890,7 +2937,7 @@ def calcular_nomina(db, obra_id, ws, jornada, aplicar_retardos):
         # buscar empleado por cedula en la obra
         emp = db.execute(
             "SELECT e.id, e.nombre, e.primer_apellido, e.segundo_apellido, e.curp, e.rfc, "
-            "e.nss, e.infonavit_monto, e.viaticos_semanales AS viat_emp, e.bono_semanal AS bono_emp, "
+            "e.nss, e.infonavit_monto, e.bono_semanal AS bono_emp, "
             "p.nombre AS puesto, p.clasificacion, "
             "p.sueldo_semanal, p.viaticos_semanales "
             "FROM empleados e JOIN puestos p ON p.id=e.puesto_id "
@@ -2919,8 +2966,9 @@ def calcular_nomina(db, obra_id, ws, jornada, aplicar_retardos):
         baja_fecha = str(baja_fecha).strip() if baja_fecha not in (None, "") else ""
 
         sueldo_semanal = _num(emp["sueldo_semanal"])
-        # viaticos: si el trabajador tiene su propio valor se usa; si no, el del puesto
-        viaticos_semanal = _num(emp["viat_emp"]) if emp["viat_emp"] is not None else _num(emp["viaticos_semanales"])
+        # Sueldo y viaticos siempre vienen del puesto/categoria (catalogo de sueldos);
+        # ya no hay un viatico individual por trabajador que lo sobre-escriba.
+        viaticos_semanal = _num(emp["viaticos_semanales"])
         bono_semanal = _num(emp["bono_emp"])
         sueldo_diario = sueldo_semanal / 6.0
         viatico_diario = viaticos_semanal / 6.0

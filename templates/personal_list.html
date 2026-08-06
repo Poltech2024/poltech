@@ -3,6 +3,12 @@
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h3 class="mb-0">Personal</h3>
   <div class="d-flex gap-2">
+    {% if current_user.rank >= ADMIN_RANK %}
+    <form method="post" action="{{ url_for('personal_rellenar_fecha_solicitud') }}"
+          onsubmit="return confirm('Calcular la fecha de solicitud IMSS (alta menos 5 dias) para todos los trabajadores que no la tengan? No se pisa la de nadie que ya la tenga.');">
+      <button class="btn btn-outline-secondary">Rellenar fecha de solicitud faltante</button>
+    </form>
+    {% endif %}
     <a class="btn btn-outline-primary" href="{{ url_for('personal_carga') }}">Carga trabajadores</a>
     <a class="btn btn-primary" href="{{ url_for('personal_nuevo') }}">+ Alta de empleado</a>
   </div>

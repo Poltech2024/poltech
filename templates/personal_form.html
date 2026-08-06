@@ -66,22 +66,18 @@
   </div>
 
   <div class="row g-3 mb-2">
-    <div class="col-md-3"><label class="form-label">Fecha de alta *</label>
+    <div class="col-md-4"><label class="form-label">Fecha de alta *</label>
       <input name="fecha_alta" type="date" class="form-control" value="{{ datos.get('fecha_alta','') }}" required></div>
-    <div class="col-md-3"><label class="form-label">Salario alta IMSS (diario)</label>
+    <div class="col-md-4"><label class="form-label">Salario alta IMSS (diario)</label>
       <input name="importe_alta_imss" id="salario_alta" type="number" step="0.01" class="form-control"
              value="{{ datos.get('importe_alta_imss','') or (propuesta_salario if propuesta_salario is defined else '') }}">
       {% if not editar and propuesta_salario is defined %}
       <div class="form-text">Propuesta: salario minimo del dia + extra. Editable.</div>
       {% endif %}</div>
-    <div class="col-md-3"><label class="form-label">Viaticos semanales</label>
-      <input name="viaticos_semanales" id="viaticos_emp" type="number" step="0.01" class="form-control"
-             value="{{ datos.get('viaticos_semanales','') }}">
-      <div class="form-text">Se sugiere el del puesto; ajustalo o pon 0 si no lleva.</div></div>
-    <div class="col-md-3"><label class="form-label">Bono semanal</label>
+    <div class="col-md-4"><label class="form-label">Bono semanal</label>
       <input name="bono_semanal" type="number" step="0.01" class="form-control"
              value="{{ datos.get('bono_semanal','') or '0' }}">
-      <div class="form-text">Se prorratea por dias, como los viaticos.</div></div>
+      <div class="form-text">Extra individual (no del catalogo); se prorratea por dias, como los viaticos.</div></div>
   </div>
 
   <div class="row g-3 mb-2">
@@ -181,23 +177,6 @@
   }
   filtrarPuestos();
   obraSel.addEventListener("change", function(){ filtrarPuestos(); proponerSalario(); });
-
-  // Sugerir los viaticos del puesto al elegirlo (se llena solo; editable)
-  var viatEmp = document.getElementById("viaticos_emp");
-  function sugerirViaticos(){
-    if(!puestoSel || !viatEmp) return;
-    var op = puestoSel.options[puestoSel.selectedIndex];
-    if(!op) return;
-    var v = op.getAttribute("data-viat");
-    if(v !== null && v !== "") viatEmp.value = parseFloat(v);
-  }
-  if(puestoSel && viatEmp){
-    puestoSel.addEventListener("change", function(){
-      // solo autocompleta si el campo esta vacio (no pisa lo que ya capturaron)
-      if(!viatEmp.value) sugerirViaticos();
-    });
-    {% if not editar %}if(!viatEmp.value) sugerirViaticos();{% endif %}
-  }
 
   // Sugerir fecha de solicitud IMSS = fecha de alta - 5 dias (editable)
   var altaInp = document.querySelector('input[name="fecha_alta"]');
