@@ -65,3 +65,8 @@ para poder generar reportes y alertas de vencimiento.
 - Subir los PDF de los comprobantes/pagos de nomina (evidencia de que se pago).
 - Generar consultas de CEP (Comprobante Electronico de Pago) de Banxico para corroborar
   que el pago realmente se ejecuto (no solo que se calculo/libero en el sistema).
+
+## Rol de descanso de los sabados (pendiente, NUEVA)
+Hacer el rol/calendario de quien descansa cada sabado (rotacion del personal).
+Falta definir en una sesion futura como se organiza (por obra, por trabajador, etc.)
+y si se necesita una pantalla en el sistema o solo un documento/plantilla.
