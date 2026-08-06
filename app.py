@@ -29,7 +29,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.environ.get("DB_PATH", os.path.join(APP_DIR, "poltech.db"))
 
-APP_VERSION = "1.29"   # version del sistema (visible en el menu)
+APP_VERSION = "1.30"   # version del sistema (visible en el menu)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-cambia-esta-clave-en-render")
@@ -476,7 +476,9 @@ def init_db():
                       ("fecha_registro", "TEXT"), ("fecha_solicitud", "TEXT"),
                       ("fecha_baja", "TEXT"), ("motivo_baja", "TEXT"),
                       ("viaticos_semanales", "REAL"), ("bono_semanal", "REAL DEFAULT 0"),
-                      ("nss_generico", "INTEGER DEFAULT 0"), ("autoriza_nss_generico", "TEXT")):
+                      ("nss_generico", "INTEGER DEFAULT 0"), ("autoriza_nss_generico", "TEXT"),
+                      ("vacaciones_ajuste_dias", "INTEGER DEFAULT 0"),
+                      ("vacaciones_ajuste_motivo", "TEXT")):
         try:
             db.execute(f"ALTER TABLE empleados ADD COLUMN {col} {tipo}")
         except sqlite3.OperationalError:
@@ -528,6 +530,15 @@ def init_db():
                        "VALUES(?,?,1,?)", (eid, pid, date.today().isoformat()))
         except sqlite3.IntegrityError:
             pass
+    # Migracion suave: nomina_detalle.nombre se guardaba como "apellidos, nombre";
+    # se reordena a "nombre, apellidos" para que coincida con el resto del sistema.
+    for fila in db.execute(
+            "SELECT d.id, d.nombre, e.nombre, e.primer_apellido, e.segundo_apellido "
+            "FROM nomina_detalle d JOIN empleados e ON e.id=d.empleado_id").fetchall():
+        did, guardado, nom, ap1, ap2 = fila
+        correcto = " ".join(x for x in [nom, ap1, ap2] if x)
+        if correcto and correcto != guardado:
+            db.execute("UPDATE nomina_detalle SET nombre=? WHERE id=?", (correcto, did))
     # Crear usuario administrador la primera vez
     row = db.execute("SELECT COUNT(*) FROM users").fetchone()
     if row[0] == 0:
@@ -740,14 +751,14 @@ def dias_vacaciones_ley(anios):
     return 20 + 2 * ((anios - 1) // 5)
 
 
-def vacaciones_periodos(fecha_alta):
-    """Periodos de antiguedad ya cumplidos desde la fecha de alta hasta hoy, uno
-    por cada aniversario, con los dias de ley que corresponden a cada uno."""
+def vacaciones_periodos(fecha_alta, hasta=None):
+    """Periodos de antiguedad ya cumplidos desde la fecha de alta hasta 'hasta'
+    (por defecto hoy), uno por cada aniversario, con los dias de ley de cada uno."""
     try:
         alta = date.fromisoformat(str(fecha_alta)[:10])
     except (TypeError, ValueError):
         return []
-    hoy = date.today()
+    hoy = hasta or date.today()
     periodos = []
     n = 1
     while True:
@@ -780,13 +791,24 @@ def dias_vacaciones_rango(fecha_inicio, fecha_fin):
     return dias
 
 
+def vacaciones_dias_pagados_historico(db, empleado_id):
+    """Dias de vacaciones ('V') que ya se pagaron en nominas calculadas (todas las
+    obras). Se usa para no volver a pagar dias que ya rebasan el derecho."""
+    return db.execute(
+        "SELECT COALESCE(SUM(vacaciones),0) FROM nomina_detalle WHERE empleado_id=?",
+        (empleado_id,)).fetchone()[0]
+
+
 def vacaciones_resumen(db, emp):
     """Periodos cumplidos con dias tomados/disponibles (consumo FIFO: el periodo
-    mas antiguo se consume primero) y totales."""
+    mas antiguo se consume primero) y totales. Incluye el ajuste manual (dias
+    tomados antes de usar este sistema) como ya consumido desde el periodo 1."""
     periodos = vacaciones_periodos(emp["fecha_alta"])
-    tomados_total = db.execute(
+    ajuste = emp["vacaciones_ajuste_dias"] or 0
+    autorizadas = db.execute(
         "SELECT COALESCE(SUM(dias),0) FROM vacaciones_solicitudes "
         "WHERE empleado_id=? AND estatus='autorizada'", (emp["id"],)).fetchone()[0]
+    tomados_total = ajuste + autorizadas
     restante = tomados_total
     for p in periodos:
         consumido = min(p["dias_derecho"], restante)
@@ -795,7 +817,8 @@ def vacaciones_resumen(db, emp):
         restante -= consumido
     total_derecho = sum(p["dias_derecho"] for p in periodos)
     return {"periodos": periodos, "total_derecho": total_derecho,
-            "total_tomado": tomados_total, "total_disponible": total_derecho - tomados_total}
+            "total_tomado": tomados_total, "total_disponible": total_derecho - tomados_total,
+            "ajuste": ajuste, "autorizadas": autorizadas}
 
 
 # ---------------------------------------------------------------------------
@@ -1797,7 +1820,7 @@ def crear_contrato_para(db, empleado_id, avisar_a=None):
             [avisar_a, os.environ.get("ADMIN_EMAIL", "")]))   # el administrador siempre recibe copia
         dest = [d for d in dest if d]
         enviar_correo(
-            f"POLTECH - Contrato generado: {emp['primer_apellido']} {emp['nombre']}",
+            f"POLTECH - Contrato generado: {emp['nombre']} {emp['primer_apellido']}",
             (f"Se genero el contrato de {emp['nombre']} {emp['primer_apellido']} "
              f"{emp['segundo_apellido'] or ''} (cedula {emp['cedula']}, puesto {emp['puesto']}).\n"
              f"Se adjunta para su revision. Los datos que el sistema no captura quedan como linea "
@@ -2566,10 +2589,12 @@ def personal_nuevo():
                     f"Ya existe un trabajador con ese NSS (cedula {ya['cedula']}: "
                     f"{ya['nombre']} {ya['primer_apellido']}).")
 
-        # Cuenta bancaria opcional
+        # Cuenta bancaria: obligatoria (igual que en la carga masiva).
         cta_num = solo_digitos(f.get("cta_numero", ""))
         cta_inst = f.get("cta_institucion", "").strip()
         cta_tipo = f.get("cta_tipo", "")
+        if not cta_num or not cta_inst or not cta_tipo:
+            errores.append("La cuenta bancaria (institucion, tipo de cuenta y numero) es obligatoria.")
         if cta_num:
             dup = db.execute(
                 "SELECT e.nombre, e.primer_apellido, e.segundo_apellido, e.estatus, "
@@ -3453,7 +3478,7 @@ def vacaciones():
     db = get_db()
     f_obra = request.args.get("obra_id", "").strip()
     sql = ("SELECT e.id, e.cedula, e.nombre, e.primer_apellido, e.segundo_apellido, "
-           "e.fecha_alta, o.id AS obra_id, o.nombre AS obra "
+           "e.fecha_alta, e.vacaciones_ajuste_dias, o.id AS obra_id, o.nombre AS obra "
            "FROM empleados e JOIN puestos p ON p.id=e.puesto_id JOIN obras o ON o.id=p.obra_id "
            "WHERE e.estatus='activo'")
     args = []
@@ -3537,6 +3562,34 @@ def personal_vacaciones(emp_id):
         "SELECT * FROM vacaciones_solicitudes WHERE empleado_id=? ORDER BY fecha_inicio DESC",
         (emp_id,)).fetchall()
     return render_template("vacaciones_empleado.html", emp=emp, resumen=resumen, solicitudes=solicitudes)
+
+
+@app.route("/personal/<int:emp_id>/vacaciones/ajuste", methods=["POST"])
+@min_rank(ADMIN_RANK)
+def personal_vacaciones_ajuste(emp_id):
+    db = get_db()
+    emp = db.execute("SELECT * FROM empleados WHERE id=?", (emp_id,)).fetchone()
+    if not emp:
+        abort(404)
+    try:
+        dias = int(request.form.get("dias", ""))
+    except ValueError:
+        dias = -1
+    motivo = request.form.get("motivo", "").strip()
+    if dias < 0:
+        flash("Captura un numero de dias valido (0 o mas).", "danger")
+    elif not motivo:
+        flash("Explica el motivo del ajuste (para que quede en la bitacora).", "danger")
+    else:
+        db.execute(
+            "UPDATE empleados SET vacaciones_ajuste_dias=?, vacaciones_ajuste_motivo=? WHERE id=?",
+            (dias, motivo, emp_id))
+        registrar_bitacora(db, "Ajuste de saldo de vacaciones",
+                           f"Empleado {emp['cedula']} ({emp['nombre']} {emp['primer_apellido']}): "
+                           f"se fijaron {dias} dias ya tomados antes del sistema. Motivo: {motivo}")
+        db.commit()
+        flash("Ajuste de vacaciones guardado.", "success")
+    return redirect(url_for("personal_vacaciones", emp_id=emp_id))
 
 
 @app.route("/vacaciones/solicitudes")
@@ -3674,7 +3727,7 @@ def bajas_excel():
         c.fill = PatternFill("solid", fgColor="16233C")
         c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
     for e in filas:
-        nom = titulo(" ".join(x for x in [e["primer_apellido"], e["segundo_apellido"], e["nombre"]] if x))
+        nom = titulo(" ".join(x for x in [e["nombre"], e["primer_apellido"], e["segundo_apellido"]] if x))
         ws.append([e["cedula"], nom, str(e["nss"] or ""), e["curp"], e["rfc"],
                    titulo_obra(e["puesto"] or ""), e["obra"], e["fecha_alta"],
                    e["fecha_baja"], e["motivo_baja"]])
@@ -3798,7 +3851,7 @@ def reporte_calidad_datos_excel():
         c.fill = PatternFill("solid", fgColor="16233C")
         c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
     for e in filas:
-        nom = " ".join(x for x in [e["primer_apellido"], e["segundo_apellido"], e["nombre"]] if x)
+        nom = " ".join(x for x in [e["nombre"], e["primer_apellido"], e["segundo_apellido"]] if x)
         ws.append([e["cedula"] or "", nom, e["obra"] or "", e["puesto"] or "",
                    "\n".join(e["problemas"])])
     ws.column_dimensions["A"].width = 12
@@ -4011,7 +4064,7 @@ def cuentas_plantilla():
         c.font = Font(bold=True, color="FFFFFF")
         c.fill = PatternFill("solid", fgColor="16233C")
     for e in faltantes:
-        nom = " ".join(x for x in [e["primer_apellido"], e["segundo_apellido"], e["nombre"]] if x)
+        nom = " ".join(x for x in [e["nombre"], e["primer_apellido"], e["segundo_apellido"]] if x)
         ws.append([e["cedula"], nom, e["obra"] or "", e["puesto"] or "", "", "", ""])
     anchos = [12, 30, 22, 22, 18, 20, 20]
     for i, w in enumerate(anchos, start=1):
@@ -4295,7 +4348,7 @@ def asistencia_plantilla():
     thin = Side(style="thin", color="BBBBBB")
     borde = Border(left=thin, right=thin, top=thin, bottom=thin)
     def nom(r):
-        return " ".join(x for x in [r["primer_apellido"], r["segundo_apellido"], r["nombre"]] if x)
+        return " ".join(x for x in [r["nombre"], r["primer_apellido"], r["segundo_apellido"]] if x)
     def F(**k): return Font(name="Arial", **k)
     def hdr(cell, fill=NAVY):
         cell.font = F(bold=True, size=9, color="FFFFFF")
@@ -4484,9 +4537,10 @@ def _num(v):
 def _cod(v):
     return (str(v).strip().upper()[:1]) if v is not None else ""
 
-def calcular_nomina(db, obra_id, ws, jornada, aplicar_retardos):
+def calcular_nomina(db, obra_id, ws, jornada, aplicar_retardos, viernes=None):
     """Lee la hoja 'Asistencia' (formato de 3 bloques) y calcula la nomina.
     Devuelve (detalles, avisos_baja, errores)."""
+    viernes = viernes or date.today()
     detalles, avisos_baja, errores = [], [], []
     HROW = 7
     r = HROW + 1
@@ -4502,6 +4556,7 @@ def calcular_nomina(db, obra_id, ws, jornada, aplicar_retardos):
         emp = db.execute(
             "SELECT e.id, e.nombre, e.primer_apellido, e.segundo_apellido, e.curp, e.rfc, "
             "e.nss, e.infonavit_monto, e.bono_semanal AS bono_emp, "
+            "e.fecha_alta, e.vacaciones_ajuste_dias, "
             "p.nombre AS puesto, p.clasificacion, "
             "p.sueldo_semanal, p.viaticos_semanales "
             "FROM empleados e "
@@ -4518,6 +4573,21 @@ def calcular_nomina(db, obra_id, ws, jornada, aplicar_retardos):
         dias_R = codigos.count("R")
         dias_V = codigos.count("V")
         faltas = codigos.count("F")
+
+        # No pagar mas dias de vacaciones de los que la LFT le reconoce por su
+        # antiguedad (menos el ajuste inicial y lo que ya se le pago antes).
+        if dias_V:
+            derecho_hoy = sum(p["dias_derecho"] for p in vacaciones_periodos(emp["fecha_alta"], viernes))
+            pagado_previo = vacaciones_dias_pagados_historico(db, emp["id"])
+            disponible_pago = derecho_hoy - (emp["vacaciones_ajuste_dias"] or 0) - pagado_previo
+            if dias_V > max(disponible_pago, 0):
+                excedente = dias_V - max(disponible_pago, 0)
+                errores.append(
+                    f"Cedula '{cedula}' ({nombre}): marco {dias_V} dia(s) de vacaciones (V) pero "
+                    f"solo le quedaban {max(disponible_pago, 0)} disponibles; no se pagaron "
+                    f"{excedente} dia(s) excedente(s).")
+                dias_V -= excedente
+
         dias_pagables = dias_A + dias_R + dias_V
         dias_presente = dias_A + dias_R
 
@@ -4559,7 +4629,7 @@ def calcular_nomina(db, obra_id, ws, jornada, aplicar_retardos):
             desc_retardos = round((int(retardos) // 3) * sueldo_diario, 2)
         neto = round(sueldo + viaticos + bono + he_importe - infonavit - desc_nomina - desc_otra - desc_retardos, 2)
 
-        nom_full = " ".join(x for x in [emp["primer_apellido"], emp["segundo_apellido"], emp["nombre"]] if x)
+        nom_full = " ".join(x for x in [emp["nombre"], emp["primer_apellido"], emp["segundo_apellido"]] if x)
         detalles.append({
             "empleado_id": emp["id"], "cedula": cedula, "nombre": nom_full,
             "puesto": emp["puesto"], "clasificacion": emp["clasificacion"] or "Sin clasificar",
@@ -4608,7 +4678,7 @@ def nomina():
 
         wb = openpyxl.load_workbook(archivo, data_only=True)
         ws = wb["Asistencia"] if "Asistencia" in wb.sheetnames else wb.active
-        detalles, avisos_baja, errores = calcular_nomina(db, obra_id, ws, jornada, aplicar_retardos)
+        detalles, avisos_baja, errores = calcular_nomina(db, obra_id, ws, jornada, aplicar_retardos, viernes)
         if not detalles:
             for e in errores:
                 flash(e, "warning")

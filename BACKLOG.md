@@ -9,19 +9,16 @@ Disco persistente + DB_PATH para que la base de datos ya no se borre en cada dep
 Menu agrupado (Personal / Nomina / Configuracion), quitar color dorado sin marca,
 columna fija en tabla de nomina, acentos en Aviso de baja y Comprobante de vigencia.
 
-## Correcciones (pendiente - para cerrar la Fase A)
-- Menu lateral desplegable: hoy el menu agrupado (Personal / Nomina / Configuracion)
-  siempre muestra todos los enlaces. Falta que cada grupo se pueda colapsar/expandir
-  (acordeon), para que no se vea todo junto todo el tiempo.
+## Correcciones (COMPLETADA - Fase A cerrada)
+- Menu lateral desplegable (acordeon, cerrado al entrar): hecho.
 
 ## Pendientes del documento "Pendientes_Nomina_Poltech_4.docx" (30-jul-2026)
-- Configurar SMTP en Render: faltan las variables de correo para que SALGAN los avisos
-  (baja al admin/contador, nomina liberada). El correo del contador ya esta cargado.
-  Estado: pendiente de configuracion (no de codigo).
-- Baja / reingreso por NSS: permitir reingresar a un trabajador dado de baja conservando
-  la misma cedula.
-- Reportes (backlog, ya identificados antes): retardos por obra, horas extra, fechas de
-  ingreso (aguinaldos), nomina y bitacora exportables.
+- Configurar SMTP en Render: hecho, correo confirmado funcionando en produccion.
+- Baja / reingreso por NSS conservando cedula: hecho (modulo de solicitud/autorizacion
+  de reingreso, preserva la cedula original).
+- Reportes (backlog, ya identificados antes): calidad de datos e historial de nomina ya
+  existen (modulo Reportes). Siguen pendientes: retardos por obra, horas extra, fechas de
+  ingreso (aguinaldos), bitacora exportable.
 - Obras y Catalogo: se queda restringido de superintendente hacia arriba (decidido, sin cambio).
 
 ## Fase B - Migrar SQLite a PostgreSQL (pendiente)
@@ -85,6 +82,9 @@ tomados/disponibles por periodo (Vacaciones en el menu Personal), flujo de solic
 (cualquier rol con acceso a la obra) y autorizacion (superintendente/administrador), y
 hoja de referencia "Vacaciones" en la plantilla de asistencia para saber a quien marcarle
 "V" esa semana (el pago de esos dias sin prima ya existia en el calculo de nomina).
+Ademas: si se marcan mas dias "V" de los que le quedan de derecho, el excedente no se paga
+(aviso al calcular la nomina); y hay un ajuste manual (solo administrador) para capturar
+cuantos dias ya tomo un trabajador antiguo antes de usar este sistema.
 
 ## Reportes de KPIs por gerencia (pendiente, NUEVA)
 Hacer reportes de indicadores clave (KPIs) por cada una de las gerencias. Falta definir en

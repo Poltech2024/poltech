@@ -35,6 +35,26 @@
   </div>
 </div>
 
+{% if current_user.rank >= ADMIN_RANK %}
+<div class="card p-3 mb-3" style="max-width:640px">
+  <h6 class="text-navy">Ajuste de saldo inicial (solo administrador)</h6>
+  <p class="text-muted small mb-2">
+    Para trabajadores con antiguedad de antes de usar este sistema: cuantos dias de
+    vacaciones ya tomo en total (de todos sus periodos), para que el saldo disponible
+    salga correcto de aqui en adelante.
+    {% if resumen.ajuste %}Ajuste actual: <b>{{ resumen.ajuste }} dias</b>
+      ({{ emp.vacaciones_ajuste_motivo or 'sin motivo registrado' }}).{% else %}Sin ajuste registrado (0 dias).{% endif %}
+  </p>
+  <form method="post" action="{{ url_for('personal_vacaciones_ajuste', emp_id=emp.id) }}" class="row g-2">
+    <div class="col-md-4"><label class="form-label small mb-1">Dias ya tomados antes del sistema</label>
+      <input type="number" min="0" name="dias" class="form-control" value="{{ resumen.ajuste }}" required></div>
+    <div class="col-md-8"><label class="form-label small mb-1">Motivo / de donde sale el dato</label>
+      <input name="motivo" class="form-control" value="{{ emp.vacaciones_ajuste_motivo or '' }}" required></div>
+    <div class="col-12"><button class="btn btn-outline-primary">Guardar ajuste</button></div>
+  </form>
+</div>
+{% endif %}
+
 {% if emp.estatus == 'activo' %}
 <div class="card p-3 mb-3" style="max-width:640px">
   <h6 class="text-navy">Solicitar vacaciones</h6>

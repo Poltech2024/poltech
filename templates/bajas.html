@@ -39,7 +39,7 @@
       <tbody>
         {% for b in bajas %}
         <tr>
-          <td><b>{{ b.primer_apellido }} {{ b.segundo_apellido or '' }} {{ b.nombre }}</b>
+          <td><b>{{ b.nombre }} {{ b.primer_apellido }} {{ b.segundo_apellido or '' }}</b>
             <span class="text-muted small">{{ b.cedula }}</span></td>
           <td class="small">{{ b.nss }}</td>
           <td class="small">{{ b.puesto }}</td>

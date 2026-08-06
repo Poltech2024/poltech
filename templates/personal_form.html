@@ -112,21 +112,21 @@
   {% endif %}
 
   <h6 class="text-navy mt-3">Cuenta bancaria
-    ({{ 'opcional' if not editar else ('ya registrada, puedes corregirla' if datos.get('cta_numero')
+    ({{ 'obligatoria' if not editar else ('ya registrada, puedes corregirla' if datos.get('cta_numero')
         else 'no tiene, puedes agregarla') }})</h6>
   <div class="row g-3 mb-3">
-    <div class="col-md-4"><label class="form-label">Institucion (banco)</label>
-      <select name="cta_institucion" class="form-select">
+    <div class="col-md-4"><label class="form-label">Institucion (banco) {{ '*' if not editar }}</label>
+      <select name="cta_institucion" class="form-select" {{ 'required' if not editar }}>
         <option value="">-</option>
         {% for b in bancos %}<option {{ 'selected' if datos.get('cta_institucion')==b }}>{{ b }}</option>{% endfor %}
       </select></div>
-    <div class="col-md-4"><label class="form-label">Tipo de cuenta</label>
-      <select name="cta_tipo" class="form-select">
+    <div class="col-md-4"><label class="form-label">Tipo de cuenta {{ '*' if not editar }}</label>
+      <select name="cta_tipo" class="form-select" {{ 'required' if not editar }}>
         <option value="">-</option>
         {% for t in tipos %}<option {{ 'selected' if datos.get('cta_tipo')==t }}>{{ t }}</option>{% endfor %}
       </select></div>
-    <div class="col-md-4"><label class="form-label">Numero</label>
-      <input name="cta_numero" class="form-control" value="{{ datos.get('cta_numero','') }}">
+    <div class="col-md-4"><label class="form-label">Numero {{ '*' if not editar }}</label>
+      <input name="cta_numero" class="form-control" value="{{ datos.get('cta_numero','') }}" {{ 'required' if not editar }}>
       <div class="form-text">No se permiten cuentas duplicadas.</div></div>
   </div>
 

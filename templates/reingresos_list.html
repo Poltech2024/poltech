@@ -12,7 +12,7 @@
       <tbody>
         {% for s in solicitudes %}
         <tr>
-          <td><b>{{ s.primer_apellido }} {{ s.segundo_apellido or '' }} {{ s.nombre }}</b>
+          <td><b>{{ s.nombre }} {{ s.primer_apellido }} {{ s.segundo_apellido or '' }}</b>
             <span class="text-muted small">{{ s.cedula }}</span></td>
           <td class="small">{{ s.fecha_baja }}<br><span class="text-muted">{{ s.motivo_baja or '' }}</span></td>
           <td class="small">{{ s.obra_nueva }}<br>{{ s.puesto_nuevo }}</td>

@@ -52,7 +52,7 @@
         {% for e in faltantes %}
         <tr>
           <td><b>{{ e.cedula }}</b></td>
-          <td>{{ e.primer_apellido }} {{ e.segundo_apellido or '' }} {{ e.nombre }}</td>
+          <td>{{ e.nombre }} {{ e.primer_apellido }} {{ e.segundo_apellido or '' }}</td>
           <td class="small">{{ e.obra or '-' }}</td>
           <td class="small">{{ e.puesto or '-' }}</td>
         </tr>

@@ -52,7 +52,7 @@
           {% set e = f.emp %}
           <tr data-emp="{{ e.id }}">
             <td class="text-center text-muted">{{ e.cedula or '-' }}</td>
-            <td class="fw-semibold">{{ e.primer_apellido }} {{ e.segundo_apellido or '' }} {{ e.nombre }}</td>
+            <td class="fw-semibold">{{ e.nombre }} {{ e.primer_apellido }} {{ e.segundo_apellido or '' }}</td>
             <td class="small text-muted">{{ e.puesto }}</td>
             {% for k, etq in dias_semana %}
             <td class="p-1 {% if k == 'd3' %}table-secondary{% endif %}">

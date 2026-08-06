@@ -32,7 +32,7 @@
         {% for f in filas %}
         <tr>
           <td><b>{{ f.emp.cedula or '-' }}</b></td>
-          <td>{{ f.emp.primer_apellido }} {{ f.emp.segundo_apellido or '' }} {{ f.emp.nombre }}</td>
+          <td>{{ f.emp.nombre }} {{ f.emp.primer_apellido }} {{ f.emp.segundo_apellido or '' }}</td>
           <td class="small">{{ f.emp.obra or '-' }}</td>
           <td class="text-end">{{ f.antiguedad_anios }} año{{ 's' if f.antiguedad_anios != 1 else '' }}</td>
           <td class="text-end">{{ f.total_derecho }}</td>
