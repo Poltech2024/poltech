@@ -29,7 +29,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.environ.get("DB_PATH", os.path.join(APP_DIR, "poltech.db"))
 
-APP_VERSION = "1.17"   # version del sistema (visible en el menu)
+APP_VERSION = "1.18"   # version del sistema (visible en el menu)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-cambia-esta-clave-en-render")
@@ -1224,8 +1224,9 @@ def generar_contrato_docx(db, emp):
         "alimentaci\u00f3n. Ning\u00fan traslado reducir\u00e1 el salario o las prestaciones.")
     par("SEXTA. JORNADA Y HORARIO ORDINARIO", bold=True)
     par_seg([
-        "La jornada ordinaria vigente al firmar ser\u00e1: ", blank(), ". El periodo para alimentos "
-        "ser\u00e1 de ", blank(), " y EL TRABAJADOR ", blank(), " podr\u00e1 disponer libremente de ese "
+        "La jornada ordinaria vigente al firmar ser\u00e1: lunes a viernes de 8:00 a 18:00 horas y "
+        "s\u00e1bados de 8:00 a 12:00 horas, con un total de 48 horas efectivas semanales. El periodo "
+        "para alimentos ser\u00e1 de una hora diaria y EL TRABAJADOR S\u00cd podr\u00e1 disponer libremente de ese "
         "tiempo y salir del \u00e1rea de trabajo. Si debe permanecer a disposici\u00f3n de EL PATR\u00d3N, el "
         "tiempo se computar\u00e1 como jornada.",
     ])

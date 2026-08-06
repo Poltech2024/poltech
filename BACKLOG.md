@@ -84,3 +84,8 @@ Que el trabajador (o quien capture) pueda solicitar fechas de vacaciones, y llev
 control de cuantos dias ha tomado cada quien y cuando, contra los dias que le corresponden
 por su antiguedad. Falta definir en una sesion futura el flujo (quien solicita, quien
 autoriza) y como se conecta con el calculo de nomina (dias V ya existen en la asistencia).
+
+## Reportes de KPIs por gerencia (pendiente, NUEVA)
+Hacer reportes de indicadores clave (KPIs) por cada una de las gerencias. Falta definir en
+una sesion futura que gerencias son, que KPIs le importan a cada una y de donde salen los
+datos (nomina, asistencia, catalogo, etc.).
