@@ -29,7 +29,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.environ.get("DB_PATH", os.path.join(APP_DIR, "poltech.db"))
 
-APP_VERSION = "1.21"   # version del sistema (visible en el menu)
+APP_VERSION = "1.22"   # version del sistema (visible en el menu)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-cambia-esta-clave-en-render")
@@ -833,6 +833,32 @@ def fecha_larga(fecha_iso):
     except ValueError:
         return None
     return f"{d.day} de {MESES_ES[d.month-1]} de {d.year}"
+
+def normalizar_fecha(valor):
+    """Convierte una fecha a AAAA-MM-DD (formato interno) sin importar como haya
+    llegado desde un Excel: fecha nativa de Excel, DD-MM-AAAA o DD/MM/AAAA (formato
+    mexicano) o ya en AAAA-MM-DD. Si no se reconoce el formato, se regresa el texto
+    tal cual para que quien valida la fila la rechace en vez de guardar una fecha
+    incorrecta."""
+    if isinstance(valor, (datetime, date)):
+        return valor.strftime("%Y-%m-%d")
+    s = "" if valor is None else str(valor).strip()
+    if not s:
+        return ""
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", s):
+        return s
+    m = re.fullmatch(r"(\d{1,2})[/-](\d{1,2})[/-](\d{4})", s)
+    if m:
+        d, mo, y = (int(g) for g in m.groups())
+        try:
+            return date(y, mo, d).isoformat()
+        except ValueError:
+            return s
+    return s
+
+def fecha_valida(s):
+    """True si s es una fecha en formato interno AAAA-MM-DD reconocible."""
+    return bool(re.fullmatch(r"\d{4}-\d{2}-\d{2}", s or ""))
 
 def _centenas_letra(n):
     UNIDADES = ["", "UNO", "DOS", "TRES", "CUATRO", "CINCO", "SEIS", "SIETE", "OCHO", "NUEVE",
@@ -2474,28 +2500,7 @@ def personal_carga():
              falta, salario, infonavit, banco, tipo_cta, num_cta, obs) = vals
 
             def txt(x): return "" if x is None else str(x).strip()
-            def fecha_txt(x):
-                """Convierte la fecha a AAAA-MM-DD (formato interno) sin importar como
-                haya llegado: fecha nativa de Excel, DD-MM-AAAA o DD/MM/AAAA (formato
-                mexicano, el que se pide en la plantilla) o ya en AAAA-MM-DD.
-                Si no se reconoce el formato, se regresa tal cual para que la fila
-                se marque con error en vez de guardar una fecha incorrecta."""
-                if isinstance(x, (datetime, date)):
-                    return x.strftime("%Y-%m-%d")
-                s = txt(x)
-                if not s:
-                    return ""
-                if re.fullmatch(r"\d{4}-\d{2}-\d{2}", s):
-                    return s
-                m = re.fullmatch(r"(\d{1,2})[/-](\d{1,2})[/-](\d{4})", s)
-                if m:
-                    d, mo, y = (int(g) for g in m.groups())
-                    try:
-                        return date(y, mo, d).isoformat()
-                    except ValueError:
-                        return s
-                return s
-            def fecha_valida(s): return bool(re.fullmatch(r"\d{4}-\d{2}-\d{2}", s or ""))
+            fecha_txt = normalizar_fecha
             nombre, ap1, ap2 = titulo(txt(nombre)), titulo(txt(ap1)), titulo(txt(ap2))
             curp = txt(curp).upper()
             nss = solo_digitos(txt(nss))
@@ -3340,7 +3345,7 @@ def asistencia_plantilla():
     HROW = 7
     cab = ["No.", "CEDULA", "NOMBRE DEL TRABAJADOR"]
     cab += [f"{etqs[i]}\n{fechas[i]}" for i in range(7)]                 # D-J asistencia
-    cab += ["DIAS", "FALTAS", "RET.", "VAC.", "BAJA\n(Ultimo dia trabajado)"]  # K-O
+    cab += ["DIAS", "FALTAS", "RET.", "VAC.", "BAJA\n(Ultimo dia trabajado)\nDD-MM-AAAA"]  # K-O
     cab += [f"{etqs[i]}\n{fechas[i]}" for i in range(7)]                 # P-V horas extra
     cab += ["TOTAL\nHORAS EXTRAS", "TIPO", "VALOR"]                      # W-Y
     cab += [f"{etqs[i]}\n{fechas[i]}" for i in range(7)]                 # Z-AF retardos
@@ -3402,6 +3407,8 @@ def asistencia_plantilla():
         dv("decimal", "0", f"Y{HROW+1}:Y{ult}")                 # valor
         dv("list", '"0,1"', f"Z{HROW+1}:AF{ult}",
            "1 = ese dia tuvo retardo.  0 = sin retardo.", "Retardos")
+        dv("custom", "TRUE", f"O{HROW+1}:O{ult}",
+           "Si hay baja, escribe la fecha como DD-MM-AAAA (ej. 15-08-2026).", "Fecha de baja")
         dv("decimal", "0", f"AG{HROW+1}:AH{ult}")               # descuentos
 
     anchos = ([5, 10, 30] + [6]*7 + [7, 8, 6, 6, 12] + [6]*7 + [9, 9, 8] + [6]*7 + [12, 13, 32])
@@ -3512,8 +3519,12 @@ def calcular_nomina(db, obra_id, ws, jornada, aplicar_retardos):
         desc_nomina = _num(ws.cell(r, 33).value)
         desc_otra = _num(ws.cell(r, 34).value)
         obs = str(ws.cell(r, 35).value or "").strip()   # a quien se deposita el desc. a otra cuenta
-        baja_fecha = ws.cell(r, 15).value
-        baja_fecha = str(baja_fecha).strip() if baja_fecha not in (None, "") else ""
+        baja_fecha = normalizar_fecha(ws.cell(r, 15).value)
+        if baja_fecha and not fecha_valida(baja_fecha):
+            errores.append(
+                f"Cedula '{cedula}' ({nombre}): la fecha de baja '{baja_fecha}' no se "
+                f"reconocio (usa DD-MM-AAAA); no se registro la baja de esta fila.")
+            baja_fecha = ""
 
         sueldo_semanal = _num(emp["sueldo_semanal"])
         # Sueldo y viaticos siempre vienen del puesto/categoria (catalogo de sueldos);
