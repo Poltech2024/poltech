@@ -70,3 +70,9 @@ para poder generar reportes y alertas de vencimiento.
 Hacer el rol/calendario de quien descansa cada sabado (rotacion del personal).
 Falta definir en una sesion futura como se organiza (por obra, por trabajador, etc.)
 y si se necesita una pantalla en el sistema o solo un documento/plantilla.
+
+## Modulo de vacaciones (pendiente, NUEVA)
+Que el trabajador (o quien capture) pueda solicitar fechas de vacaciones, y llevar un
+control de cuantos dias ha tomado cada quien y cuando, contra los dias que le corresponden
+por su antiguedad. Falta definir en una sesion futura el flujo (quien solicita, quien
+autoriza) y como se conecta con el calculo de nomina (dias V ya existen en la asistencia).
