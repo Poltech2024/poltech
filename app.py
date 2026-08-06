@@ -29,7 +29,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.environ.get("DB_PATH", os.path.join(APP_DIR, "poltech.db"))
 
-APP_VERSION = "1.20"   # version del sistema (visible en el menu)
+APP_VERSION = "1.21"   # version del sistema (visible en el menu)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-cambia-esta-clave-en-render")
@@ -1626,13 +1626,16 @@ def crear_contrato_para(db, empleado_id, avisar_a=None):
     registrar_bitacora(db, "Contrato generado",
                        f"{emp['nombre']} {emp['primer_apellido']} (cedula {emp['cedula']})")
     if avisar_a:
+        dest = list(dict.fromkeys(
+            [avisar_a, os.environ.get("ADMIN_EMAIL", "")]))   # el administrador siempre recibe copia
+        dest = [d for d in dest if d]
         enviar_correo(
             f"POLTECH - Contrato generado: {emp['primer_apellido']} {emp['nombre']}",
             (f"Se genero el contrato de {emp['nombre']} {emp['primer_apellido']} "
              f"{emp['segundo_apellido'] or ''} (cedula {emp['cedula']}, puesto {emp['puesto']}).\n"
              f"Se adjunta para su revision. Los datos que el sistema no captura quedan como linea "
              f"para completar a mano."),
-            [avisar_a],
+            dest,
             adjuntos=[(archivo, datos,
                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document")])
     return cur.lastrowid
