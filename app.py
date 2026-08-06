@@ -29,7 +29,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.environ.get("DB_PATH", os.path.join(APP_DIR, "poltech.db"))
 
-APP_VERSION = "1.25"   # version del sistema (visible en el menu)
+APP_VERSION = "1.26"   # version del sistema (visible en el menu)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-cambia-esta-clave-en-render")
@@ -3434,13 +3434,9 @@ def problemas_empleado(db, emp):
     return problemas
 
 
-@app.route("/reportes/calidad-datos")
-@min_rank(GERENTE_RANK)
-def reporte_calidad_datos():
-    db = get_db()
-    f_obra = request.args.get("obra", "").strip()
-    f_clasif = request.args.get("clasificacion", "").strip()
-
+def calidad_datos_filas(db, f_obra, f_clasif):
+    """Empleados activos (visibles para el usuario en sesion) con sus problemas
+    de informacion. Devuelve (total_revisados, filas_con_problemas)."""
     sql = ("SELECT e.*, p.nombre AS puesto, p.clasificacion, o.nombre AS obra "
            "FROM empleados e "
            "LEFT JOIN puestos p ON p.id=e.puesto_id "
@@ -3469,13 +3465,56 @@ def reporte_calidad_datos():
             d = dict(e)
             d["problemas"] = problemas
             filas.append(d)
+    return total, filas
 
+
+@app.route("/reportes/calidad-datos")
+@min_rank(GERENTE_RANK)
+def reporte_calidad_datos():
+    db = get_db()
+    f_obra = request.args.get("obra", "").strip()
+    f_clasif = request.args.get("clasificacion", "").strip()
+    total, filas = calidad_datos_filas(db, f_obra, f_clasif)
     obras = db.execute("SELECT DISTINCT nombre FROM obras ORDER BY nombre").fetchall()
     clasificaciones = [r["nombre"] for r in
                         db.execute("SELECT nombre FROM clasificaciones ORDER BY nombre").fetchall()]
     return render_template("reporte_calidad_datos.html", filas=filas, total=total,
                            obras=obras, clasificaciones=clasificaciones,
                            filtros={"obra": f_obra, "clasificacion": f_clasif})
+
+
+@app.route("/reportes/calidad-datos/excel")
+@min_rank(GERENTE_RANK)
+def reporte_calidad_datos_excel():
+    db = get_db()
+    f_obra = request.args.get("obra", "").strip()
+    f_clasif = request.args.get("clasificacion", "").strip()
+    _, filas = calidad_datos_filas(db, f_obra, f_clasif)
+
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment
+    wb = Workbook(); ws = wb.active; ws.title = "Calidad de datos"
+    cab = ["CEDULA", "TRABAJADOR", "OBRA", "PUESTO", "OBSERVACIONES"]
+    ws.append(cab)
+    for c in ws[1]:
+        c.font = Font(name="Arial", bold=True, color="FFFFFF")
+        c.fill = PatternFill("solid", fgColor="16233C")
+        c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    for e in filas:
+        nom = " ".join(x for x in [e["primer_apellido"], e["segundo_apellido"], e["nombre"]] if x)
+        ws.append([e["cedula"] or "", nom, e["obra"] or "", e["puesto"] or "",
+                   "\n".join(e["problemas"])])
+    ws.column_dimensions["A"].width = 12
+    ws.column_dimensions["B"].width = 30
+    ws.column_dimensions["C"].width = 22
+    ws.column_dimensions["D"].width = 22
+    ws.column_dimensions["E"].width = 60
+    for row in ws.iter_rows(min_row=2):
+        row[4].alignment = Alignment(wrap_text=True, vertical="top")
+    buf = io.BytesIO(); wb.save(buf); buf.seek(0)
+    return send_file(buf, as_attachment=True,
+                     download_name="Reporte_calidad_datos.xlsx",
+                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 
 # ---------------------------------------------------------------------------

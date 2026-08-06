@@ -3,7 +3,12 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3 no-print">
   <h3 class="mb-0">Reportes &middot; Calidad de datos</h3>
-  <button class="btn btn-outline-primary" onclick="window.print()">Imprimir</button>
+  <div class="d-flex gap-2">
+    <a class="btn btn-outline-success"
+       href="{{ url_for('reporte_calidad_datos_excel', obra=filtros.obra, clasificacion=filtros.clasificacion) }}">
+      Descargar Excel</a>
+    <button class="btn btn-outline-primary" onclick="window.print()">Imprimir</button>
+  </div>
 </div>
 
 <div class="card mb-3 no-print">
