@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h3 class="mb-0">Vacaciones</h3>
+  {% if current_user.rank >= GERENTE_RANK %}
+  <a class="btn btn-outline-primary" href="{{ url_for('vacaciones_solicitudes') }}">Solicitudes de vacaciones</a>
+  {% endif %}
+</div>
+<p class="text-muted small">
+  Dias que corresponden segun la tabla de antiguedad de la Ley Federal del Trabajo (no incluye prima vacacional).
+  Los dias autorizados se pagan marcando "V" en la asistencia de esa semana.
+</p>
+
+<form method="get" class="row g-2 mb-3" style="max-width:420px">
+  <div class="col-9">
+    <select name="obra_id" class="form-select form-select-sm" onchange="this.form.submit()">
+      <option value="">Todas las obras</option>
+      {% for o in obras %}<option value="{{ o.id }}" {{ 'selected' if f_obra==o.id|string }}>{{ o.nombre }}</option>{% endfor %}
+    </select>
+  </div>
+</form>
+
+<div class="card">
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead><tr>
+        <th>Cedula</th><th>Trabajador</th><th>Obra</th><th class="text-end">Antiguedad</th>
+        <th class="text-end">Dias de ley</th><th class="text-end">Tomados</th>
+        <th class="text-end">Disponibles</th><th></th>
+      </tr></thead>
+      <tbody>
+        {% for f in filas %}
+        <tr>
+          <td><b>{{ f.emp.cedula or '-' }}</b></td>
+          <td>{{ f.emp.primer_apellido }} {{ f.emp.segundo_apellido or '' }} {{ f.emp.nombre }}</td>
+          <td class="small">{{ f.emp.obra or '-' }}</td>
+          <td class="text-end">{{ f.antiguedad_anios }} año{{ 's' if f.antiguedad_anios != 1 else '' }}</td>
+          <td class="text-end">{{ f.total_derecho }}</td>
+          <td class="text-end">{{ f.total_tomado }}</td>
+          <td class="text-end"><b>{{ f.total_disponible }}</b></td>
+          <td class="text-end">
+            <a class="btn btn-sm btn-outline-secondary py-0 px-2"
+               href="{{ url_for('personal_vacaciones', emp_id=f.emp.id) }}">Detalle</a>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8" class="text-center text-muted py-4">No hay trabajadores activos con esos filtros.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

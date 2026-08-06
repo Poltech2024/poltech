@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h3 class="mb-0">Solicitudes de vacaciones</h3>
+  <a class="btn btn-outline-secondary" href="{{ url_for('vacaciones') }}">Volver a Vacaciones</a>
+</div>
+
+<div class="card">
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead><tr>
+        <th>Trabajador</th><th>Obra</th><th>Del</th><th>Al</th><th class="text-end">Dias</th>
+        <th>Solicito</th><th>Estatus</th><th></th>
+      </tr></thead>
+      <tbody>
+        {% for s in solicitudes %}
+        <tr>
+          <td>{{ s.primer_apellido }} {{ s.segundo_apellido or '' }} {{ s.nombre }}
+            <span class="text-muted small">{{ s.cedula }}</span></td>
+          <td class="small">{{ s.obra or '-' }}</td>
+          <td>{{ s.fecha_inicio }}</td><td>{{ s.fecha_fin }}</td>
+          <td class="text-end">{{ s.dias }}</td>
+          <td class="small">{{ s.solicitado_por or '-' }}</td>
+          <td>
+            {% if s.estatus == 'autorizada' %}<span class="badge text-bg-success">Autorizada</span>
+            {% elif s.estatus == 'rechazada' %}<span class="badge text-bg-danger">Rechazada</span>
+            {% else %}<span class="badge text-bg-warning text-dark">Pendiente</span>{% endif %}
+          </td>
+          <td class="text-end text-nowrap">
+            {% if s.estatus == 'pendiente' %}
+            <form method="post" action="{{ url_for('vacacion_autorizar', sol_id=s.id) }}" class="d-inline"
+                  onsubmit="return confirm('Autorizar estas vacaciones?');">
+              <button class="btn btn-sm btn-outline-success">Autorizar</button>
+            </form>
+            <form method="post" action="{{ url_for('vacacion_rechazar', sol_id=s.id) }}" class="d-inline"
+                  onsubmit="return confirm('Rechazar esta solicitud?');">
+              <button class="btn btn-sm btn-outline-danger">Rechazar</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8" class="text-center text-muted py-4">No hay solicitudes de vacaciones.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

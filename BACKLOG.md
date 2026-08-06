@@ -79,11 +79,12 @@ de inmediato. Falta escribir las funciones detalladas y especificas de cada pues
 un manual de operaciones real, que tambien viva en el sistema (por ejemplo, reemplazando
 el texto generico del Anexo 1 con el detallado de cada puesto).
 
-## Modulo de vacaciones (pendiente, NUEVA)
-Que el trabajador (o quien capture) pueda solicitar fechas de vacaciones, y llevar un
-control de cuantos dias ha tomado cada quien y cuando, contra los dias que le corresponden
-por su antiguedad. Falta definir en una sesion futura el flujo (quien solicita, quien
-autoriza) y como se conecta con el calculo de nomina (dias V ya existen en la asistencia).
+## Modulo de vacaciones (COMPLETADA)
+Calculo de dias por antiguedad (tabla LFT vigente, sin prima vacacional), dashboard de
+tomados/disponibles por periodo (Vacaciones en el menu Personal), flujo de solicitud
+(cualquier rol con acceso a la obra) y autorizacion (superintendente/administrador), y
+hoja de referencia "Vacaciones" en la plantilla de asistencia para saber a quien marcarle
+"V" esa semana (el pago de esos dias sin prima ya existia en el calculo de nomina).
 
 ## Reportes de KPIs por gerencia (pendiente, NUEVA)
 Hacer reportes de indicadores clave (KPIs) por cada una de las gerencias. Falta definir en

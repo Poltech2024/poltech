@@ -63,6 +63,8 @@
         <td class="text-nowrap">
           <a class="btn btn-sm btn-outline-primary py-0 px-2"
              href="{{ url_for('documentos_empleado', emp_id=e.id) }}" title="Documentos">Docs</a>
+          <a class="btn btn-sm btn-outline-success py-0 px-2"
+             href="{{ url_for('personal_vacaciones', emp_id=e.id) }}" title="Vacaciones">Vac.</a>
           {% if current_user.rank >= GERENTE_RANK %}
           <a class="btn btn-sm btn-outline-dark py-0 px-2"
              href="{{ url_for('personal_obras', emp_id=e.id) }}" title="Obras adicionales">Obras</a>

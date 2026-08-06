@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-1">
+  <h3 class="mb-0">Vacaciones de {{ emp.nombre }} {{ emp.primer_apellido }} {{ emp.segundo_apellido or '' }}</h3>
+  <a class="btn btn-outline-secondary" href="{{ url_for('vacaciones') }}">Volver</a>
+</div>
+<p class="text-muted small mb-3">Cedula {{ emp.cedula }}. Fecha de alta: {{ emp.fecha_alta }}.</p>
+
+<div class="row g-3 mb-3">
+  <div class="col-md-4"><div class="card p-3 text-center"><div class="text-muted small">Dias de ley acumulados</div><div class="fs-3 fw-bold text-navy">{{ resumen.total_derecho }}</div></div></div>
+  <div class="col-md-4"><div class="card p-3 text-center"><div class="text-muted small">Dias tomados</div><div class="fs-3 fw-bold text-navy">{{ resumen.total_tomado }}</div></div></div>
+  <div class="col-md-4"><div class="card p-3 text-center"><div class="text-muted small">Dias disponibles</div><div class="fs-3 fw-bold text-navy">{{ resumen.total_disponible }}</div></div></div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-header bg-white fw-bold text-navy">Periodos por antiguedad</div>
+  <div class="table-responsive">
+    <table class="table table-sm mb-0 align-middle">
+      <thead><tr><th>Periodo</th><th>Del</th><th>Al</th><th class="text-end">Dias de ley</th>
+        <th class="text-end">Consumidos</th><th class="text-end">Disponibles</th></tr></thead>
+      <tbody>
+        {% for p in resumen.periodos %}
+        <tr>
+          <td>Año {{ p.numero }}</td><td>{{ p.desde }}</td><td>{{ p.hasta }}</td>
+          <td class="text-end">{{ p.dias_derecho }}</td>
+          <td class="text-end">{{ p.consumido }}</td>
+          <td class="text-end">{{ p.disponible }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="text-center text-muted py-3">
+          Todavia no cumple un año de antiguedad; no tiene dias de vacaciones por ley.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% if emp.estatus == 'activo' %}
+<div class="card p-3 mb-3" style="max-width:640px">
+  <h6 class="text-navy">Solicitar vacaciones</h6>
+  <form method="post" class="row g-2">
+    <div class="col-md-4"><label class="form-label small mb-1">Del</label>
+      <input type="date" name="fecha_inicio" class="form-control" required></div>
+    <div class="col-md-4"><label class="form-label small mb-1">Al</label>
+      <input type="date" name="fecha_fin" class="form-control" required></div>
+    <div class="col-md-4"><label class="form-label small mb-1">Comentario (opcional)</label>
+      <input name="comentario" class="form-control"></div>
+    <div class="col-12"><button class="btn btn-primary">Solicitar</button></div>
+  </form>
+  <div class="form-text mt-1">El domingo no cuenta como dia de vacaciones (igual que la semana de nomina).</div>
+</div>
+{% endif %}
+
+<div class="card">
+  <div class="card-header bg-white fw-bold text-navy">Historial de solicitudes</div>
+  <div class="table-responsive">
+    <table class="table table-sm mb-0 align-middle">
+      <thead><tr><th>Del</th><th>Al</th><th class="text-end">Dias</th><th>Estatus</th><th>Comentario</th></tr></thead>
+      <tbody>
+        {% for s in solicitudes %}
+        <tr>
+          <td>{{ s.fecha_inicio }}</td><td>{{ s.fecha_fin }}</td>
+          <td class="text-end">{{ s.dias }}</td>
+          <td>
+            {% if s.estatus == 'autorizada' %}<span class="badge text-bg-success">Autorizada</span>
+            {% elif s.estatus == 'rechazada' %}<span class="badge text-bg-danger">Rechazada</span>
+            {% else %}<span class="badge text-bg-warning text-dark">Pendiente</span>{% endif %}
+          </td>
+          <td class="small text-muted">{{ s.comentario or '' }}{% if s.comentario_resolucion %} — {{ s.comentario_resolucion }}{% endif %}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="text-center text-muted py-3">Sin solicitudes todavia.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

@@ -29,7 +29,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.environ.get("DB_PATH", os.path.join(APP_DIR, "poltech.db"))
 
-APP_VERSION = "1.28"   # version del sistema (visible en el menu)
+APP_VERSION = "1.29"   # version del sistema (visible en el menu)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-cambia-esta-clave-en-render")
@@ -401,6 +401,21 @@ CREATE TABLE IF NOT EXISTS reingreso_solicitudes (
     FOREIGN KEY (empleado_id) REFERENCES empleados(id),
     FOREIGN KEY (puesto_id_nuevo) REFERENCES puestos(id)
 );
+CREATE TABLE IF NOT EXISTS vacaciones_solicitudes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    empleado_id INTEGER NOT NULL,
+    fecha_inicio TEXT NOT NULL,
+    fecha_fin TEXT NOT NULL,
+    dias INTEGER NOT NULL,
+    estatus TEXT DEFAULT 'pendiente',
+    comentario TEXT,
+    solicitado_por TEXT,
+    solicitado_en TEXT,
+    autorizado_por TEXT,
+    autorizado_en TEXT,
+    comentario_resolucion TEXT,
+    FOREIGN KEY (empleado_id) REFERENCES empleados(id)
+);
 CREATE TABLE IF NOT EXISTS empleado_puestos (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     empleado_id INTEGER NOT NULL,
@@ -709,6 +724,79 @@ def dias_para_retencion(emp):
         return ("Retenido", "danger")
     clase = "warning" if restan <= 5 else "secondary"
     return (f"{restan} dias", clase)
+
+
+# ---------------------------------------------------------------------------
+# Vacaciones: dias que corresponden por antiguedad (tabla vigente de la LFT,
+# reforma de "vacaciones dignas"). No se calcula prima vacacional aqui.
+# ---------------------------------------------------------------------------
+def dias_vacaciones_ley(anios):
+    """Dias de vacaciones que corresponden a un anio de antiguedad cumplido (1, 2, 3...)."""
+    if anios < 1:
+        return 0
+    tabla = {1: 12, 2: 14, 3: 16, 4: 18, 5: 20}
+    if anios <= 5:
+        return tabla[anios]
+    return 20 + 2 * ((anios - 1) // 5)
+
+
+def vacaciones_periodos(fecha_alta):
+    """Periodos de antiguedad ya cumplidos desde la fecha de alta hasta hoy, uno
+    por cada aniversario, con los dias de ley que corresponden a cada uno."""
+    try:
+        alta = date.fromisoformat(str(fecha_alta)[:10])
+    except (TypeError, ValueError):
+        return []
+    hoy = date.today()
+    periodos = []
+    n = 1
+    while True:
+        try:
+            fin = alta.replace(year=alta.year + n)
+        except ValueError:
+            fin = alta.replace(year=alta.year + n, day=28)
+        if fin > hoy:
+            break
+        try:
+            inicio = alta.replace(year=alta.year + n - 1)
+        except ValueError:
+            inicio = alta.replace(year=alta.year + n - 1, day=28)
+        periodos.append({"numero": n, "desde": inicio.isoformat(), "hasta": fin.isoformat(),
+                         "dias_derecho": dias_vacaciones_ley(n)})
+        n += 1
+    return periodos
+
+
+def dias_vacaciones_rango(fecha_inicio, fecha_fin):
+    """Cuenta los dias del rango sin domingo (igual que la base de 6 dias de nomina)."""
+    d0 = date.fromisoformat(fecha_inicio)
+    d1 = date.fromisoformat(fecha_fin)
+    dias = 0
+    d = d0
+    while d <= d1:
+        if d.weekday() != 6:   # domingo
+            dias += 1
+        d += timedelta(days=1)
+    return dias
+
+
+def vacaciones_resumen(db, emp):
+    """Periodos cumplidos con dias tomados/disponibles (consumo FIFO: el periodo
+    mas antiguo se consume primero) y totales."""
+    periodos = vacaciones_periodos(emp["fecha_alta"])
+    tomados_total = db.execute(
+        "SELECT COALESCE(SUM(dias),0) FROM vacaciones_solicitudes "
+        "WHERE empleado_id=? AND estatus='autorizada'", (emp["id"],)).fetchone()[0]
+    restante = tomados_total
+    for p in periodos:
+        consumido = min(p["dias_derecho"], restante)
+        p["consumido"] = consumido
+        p["disponible"] = p["dias_derecho"] - consumido
+        restante -= consumido
+    total_derecho = sum(p["dias_derecho"] for p in periodos)
+    return {"periodos": periodos, "total_derecho": total_derecho,
+            "total_tomado": tomados_total, "total_disponible": total_derecho - tomados_total}
+
 
 # ---------------------------------------------------------------------------
 # Validaciones (NSS y CURP)  -- sin librerias externas
@@ -3356,6 +3444,173 @@ def reingreso_rechazar(sol_id):
     return redirect(url_for("reingresos"))
 
 
+# ---------------------------------------------------------------------------
+# Vacaciones
+# ---------------------------------------------------------------------------
+@app.route("/vacaciones")
+@login_required
+def vacaciones():
+    db = get_db()
+    f_obra = request.args.get("obra_id", "").strip()
+    sql = ("SELECT e.id, e.cedula, e.nombre, e.primer_apellido, e.segundo_apellido, "
+           "e.fecha_alta, o.id AS obra_id, o.nombre AS obra "
+           "FROM empleados e JOIN puestos p ON p.id=e.puesto_id JOIN obras o ON o.id=p.obra_id "
+           "WHERE e.estatus='activo'")
+    args = []
+    if f_obra:
+        sql += " AND o.id=?"; args.append(int(f_obra))
+    vis = obras_del_usuario(db)
+    if vis is not None:
+        if vis:
+            ph = ",".join("?" * len(vis))
+            sql += f" AND o.id IN ({ph})"; args += vis
+        else:
+            sql += " AND 1=0"
+    sql += " ORDER BY o.nombre, e.primer_apellido, e.nombre"
+
+    filas = []
+    for e in db.execute(sql, args).fetchall():
+        r = vacaciones_resumen(db, e)
+        filas.append({"emp": e, **r, "antiguedad_anios": len(r["periodos"])})
+    obras = obras_visibles(db)
+    return render_template("vacaciones_dashboard.html", filas=filas, obras=obras, f_obra=f_obra)
+
+
+@app.route("/personal/<int:emp_id>/vacaciones", methods=["GET", "POST"])
+@login_required
+def personal_vacaciones(emp_id):
+    db = get_db()
+    emp = db.execute(
+        "SELECT e.*, p.obra_id, o.nombre AS obra FROM empleados e "
+        "LEFT JOIN puestos p ON p.id=e.puesto_id LEFT JOIN obras o ON o.id=p.obra_id "
+        "WHERE e.id=?", (emp_id,)).fetchone()
+    if not emp:
+        abort(404)
+    if not puede_ver_obra(db, emp["obra_id"]):
+        abort(403)
+
+    if request.method == "POST":
+        if emp["estatus"] != "activo":
+            flash("Solo se pueden solicitar vacaciones para un trabajador activo.", "danger")
+            return redirect(url_for("personal_vacaciones", emp_id=emp_id))
+        finicio = request.form.get("fecha_inicio", "")
+        ffin = request.form.get("fecha_fin", "")
+        comentario = request.form.get("comentario", "").strip()
+        errores = []
+        try:
+            d0 = date.fromisoformat(finicio); d1 = date.fromisoformat(ffin)
+            if d1 < d0:
+                errores.append("La fecha final no puede ser antes de la fecha inicial.")
+        except ValueError:
+            errores.append("Captura fechas validas.")
+        if not errores:
+            dias = dias_vacaciones_rango(finicio, ffin)
+            resumen = vacaciones_resumen(db, emp)
+            if dias > resumen["total_disponible"]:
+                errores.append(
+                    f"La solicitud son {dias} dias, pero el trabajador solo tiene "
+                    f"{resumen['total_disponible']} dias disponibles.")
+            cruce = db.execute(
+                "SELECT 1 FROM vacaciones_solicitudes WHERE empleado_id=? "
+                "AND estatus IN ('pendiente','autorizada') "
+                "AND fecha_inicio<=? AND fecha_fin>=?", (emp_id, ffin, finicio)).fetchone()
+            if cruce:
+                errores.append("Ya existe una solicitud pendiente o autorizada que se cruza con esas fechas.")
+        if errores:
+            for e in errores:
+                flash(e, "danger")
+        else:
+            db.execute(
+                "INSERT INTO vacaciones_solicitudes(empleado_id, fecha_inicio, fecha_fin, dias, "
+                "comentario, solicitado_por, solicitado_en) VALUES(?,?,?,?,?,?,?)",
+                (emp_id, finicio, ffin, dias, comentario, session.get("nombre"),
+                 datetime.now().isoformat(timespec="seconds")))
+            registrar_bitacora(db, "Vacaciones solicitadas",
+                               f"Empleado {emp['cedula']} ({emp['nombre']} {emp['primer_apellido']}): "
+                               f"{finicio} al {ffin} ({dias} dias)")
+            db.commit()
+            flash("Solicitud de vacaciones enviada para autorizacion.", "success")
+        return redirect(url_for("personal_vacaciones", emp_id=emp_id))
+
+    resumen = vacaciones_resumen(db, emp)
+    solicitudes = db.execute(
+        "SELECT * FROM vacaciones_solicitudes WHERE empleado_id=? ORDER BY fecha_inicio DESC",
+        (emp_id,)).fetchall()
+    return render_template("vacaciones_empleado.html", emp=emp, resumen=resumen, solicitudes=solicitudes)
+
+
+@app.route("/vacaciones/solicitudes")
+@min_rank(GERENTE_RANK)
+def vacaciones_solicitudes():
+    db = get_db()
+    sql = ("SELECT s.*, e.cedula, e.nombre, e.primer_apellido, e.segundo_apellido, "
+           "o.nombre AS obra, o.id AS obra_id "
+           "FROM vacaciones_solicitudes s JOIN empleados e ON e.id=s.empleado_id "
+           "LEFT JOIN puestos p ON p.id=e.puesto_id LEFT JOIN obras o ON o.id=p.obra_id WHERE 1=1")
+    args = []
+    vis = obras_del_usuario(db)
+    if vis is not None:
+        if vis:
+            ph = ",".join("?" * len(vis))
+            sql += f" AND o.id IN ({ph})"; args += vis
+        else:
+            sql += " AND 1=0"
+    sql += " ORDER BY (s.estatus='pendiente') DESC, s.solicitado_en DESC"
+    todas = db.execute(sql, args).fetchall()
+    return render_template("vacaciones_solicitudes.html", solicitudes=todas)
+
+
+@app.route("/vacacion/<int:sol_id>/autorizar", methods=["POST"])
+@min_rank(GERENTE_RANK)
+def vacacion_autorizar(sol_id):
+    db = get_db()
+    s = db.execute(
+        "SELECT s.*, e.cedula, e.nombre, e.primer_apellido, p.obra_id FROM vacaciones_solicitudes s "
+        "JOIN empleados e ON e.id=s.empleado_id LEFT JOIN puestos p ON p.id=e.puesto_id "
+        "WHERE s.id=?", (sol_id,)).fetchone()
+    if not s:
+        abort(404)
+    if not puede_ver_obra(db, s["obra_id"]):
+        abort(403)
+    if s["estatus"] != "pendiente":
+        flash("Esta solicitud ya fue resuelta.", "warning")
+        return redirect(url_for("vacaciones_solicitudes"))
+    db.execute(
+        "UPDATE vacaciones_solicitudes SET estatus='autorizada', autorizado_por=?, autorizado_en=? "
+        "WHERE id=?", (session.get("nombre", ""), datetime.now().isoformat(timespec="seconds"), sol_id))
+    registrar_bitacora(db, "Vacaciones autorizadas",
+                       f"Solicitud {sol_id} de {s['cedula']} ({s['nombre']} {s['primer_apellido']})")
+    db.commit()
+    flash("Vacaciones autorizadas.", "success")
+    return redirect(url_for("vacaciones_solicitudes"))
+
+
+@app.route("/vacacion/<int:sol_id>/rechazar", methods=["POST"])
+@min_rank(GERENTE_RANK)
+def vacacion_rechazar(sol_id):
+    db = get_db()
+    s = db.execute(
+        "SELECT s.*, p.obra_id FROM vacaciones_solicitudes s "
+        "JOIN empleados e ON e.id=s.empleado_id LEFT JOIN puestos p ON p.id=e.puesto_id "
+        "WHERE s.id=?", (sol_id,)).fetchone()
+    if not s:
+        abort(404)
+    if not puede_ver_obra(db, s["obra_id"]):
+        abort(403)
+    if s["estatus"] != "pendiente":
+        flash("Esta solicitud ya fue resuelta.", "warning")
+        return redirect(url_for("vacaciones_solicitudes"))
+    db.execute(
+        "UPDATE vacaciones_solicitudes SET estatus='rechazada', autorizado_por=?, autorizado_en=?, "
+        "comentario_resolucion=? WHERE id=?",
+        (session.get("nombre", ""), datetime.now().isoformat(timespec="seconds"),
+         request.form.get("comentario", "").strip(), sol_id))
+    registrar_bitacora(db, "Vacaciones rechazadas", f"Solicitud {sol_id}")
+    db.commit()
+    flash("Solicitud de vacaciones rechazada.", "success")
+    return redirect(url_for("vacaciones_solicitudes"))
+
+
 @app.route("/bajas")
 @login_required
 def bajas():
@@ -4022,6 +4277,16 @@ def asistencia_plantilla():
         "e.fecha_alta FROM empleados e JOIN puestos p ON p.id=e.puesto_id "
         "WHERE p.obra_id=? AND e.estatus<>'activo' "
         "ORDER BY e.primer_apellido, e.nombre", (obra_id,)).fetchall()
+    vacacionando = db.execute(
+        "SELECT DISTINCT e.cedula, e.nombre, e.primer_apellido, e.segundo_apellido, "
+        "v.fecha_inicio, v.fecha_fin FROM vacaciones_solicitudes v "
+        "JOIN empleados e ON e.id=v.empleado_id "
+        "JOIN empleado_puestos ep ON ep.empleado_id=e.id AND ep.activo=1 "
+        "JOIN puestos p ON p.id=ep.puesto_id "
+        "WHERE p.obra_id=? AND v.estatus='autorizada' "
+        "AND v.fecha_inicio<=? AND v.fecha_fin>=? "
+        "ORDER BY e.primer_apellido, e.nombre",
+        (obra_id, jueves.isoformat(), viernes.isoformat())).fetchall()
 
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.worksheet.datavalidation import DataValidation
@@ -4160,12 +4425,23 @@ def asistencia_plantilla():
     for i, w in enumerate([5, 10, 30, 18, 14], start=1):
         wb2.column_dimensions[L(i)].width = w
 
+    # ---- Hoja VACACIONES (referencia: a quien marcarle V esta semana) ----
+    wb3 = wb.create_sheet("Vacaciones")
+    wb3.append(["No.", "CEDULA", "NOMBRE DEL TRABAJADOR", "DESDE", "HASTA"])
+    for c in wb3[1]:
+        c.font = F(bold=True, color="FFFFFF"); c.fill = PatternFill("solid", fgColor=AZUL)
+    for idx, v in enumerate(vacacionando, start=1):
+        wb3.append([idx, v["cedula"] or "", nom(v), v["fecha_inicio"], v["fecha_fin"]])
+    for i, w in enumerate([5, 10, 30, 14, 14], start=1):
+        wb3.column_dimensions[L(i)].width = w
+
     # ---- Hoja INSTRUCCIONES ----
     ins = wb.create_sheet("Instrucciones")
     lineas = [
         ("INSTRUCCIONES DE USO", True),
         ("", False),
-        ("1. Solo se captura la hoja ASISTENCIA. La hoja BAJAS es solo de referencia.", False),
+        ("1. Solo se captura la hoja ASISTENCIA. Las hojas BAJAS y VACACIONES son solo de referencia.", False),
+        ("   VACACIONES lista a quien ponerle V esta semana (vacaciones ya autorizadas).", False),
         ("2. Completa el encabezado (celdas amarillas): Gerente de obra y Fecha de captura.", False),
         ("3. BLOQUE ASISTENCIA: en cada dia escribe el codigo", False),
         ("     A = Asistio     F = Falta     R = Retardo     V = Vacaciones     D = Descanso", False),
