@@ -1251,6 +1251,7 @@ def catalogo():
         return redirect(url_for("catalogo"))
     vis = obras_del_usuario(db)
     filtro_obra = (request.args.get("obra_id") or "").strip()
+    filtro_clasif = (request.args.get("clasificacion") or "").strip()
     where, args = [], []
     if vis is None:
         obras_l = db.execute("SELECT * FROM obras ORDER BY nombre").fetchall()
@@ -1263,6 +1264,8 @@ def catalogo():
         where.append("0")
     if filtro_obra:
         where.append("o.id = ?"); args.append(filtro_obra)
+    if filtro_clasif:
+        where.append("p.clasificacion = ?"); args.append(filtro_clasif)
     sql = ("SELECT p.*, p.nombre AS puesto, o.nombre AS obra, o.estado FROM puestos p "
            "JOIN obras o ON o.id=p.obra_id")
     if where:
@@ -1275,7 +1278,7 @@ def catalogo():
         "FROM clasificaciones c ORDER BY c.nombre"
     ).fetchall()
     return render_template("catalogo_list.html", obras=obras_l, puestos=puestos,
-                           filtro_obra=filtro_obra,
+                           filtro_obra=filtro_obra, filtro_clasif=filtro_clasif,
                            clasificaciones=[c["nombre"] for c in clasif_rows],
                            clasif_rows=clasif_rows)
 

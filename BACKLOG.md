@@ -60,3 +60,8 @@ obra/contrato con la informacion que piden los clientes:
 Falta definir en una sesion futura: si son solo archivos adjuntos (PDF/Excel) ligados a
 cada obra, o si tambien llevan datos estructurados (montos, fechas de vigencia, folios)
 para poder generar reportes y alertas de vencimiento.
+
+## Comprobantes de pago de nomina (pendiente, NUEVA - va en Fase C)
+- Subir los PDF de los comprobantes/pagos de nomina (evidencia de que se pago).
+- Generar consultas de CEP (Comprobante Electronico de Pago) de Banxico para corroborar
+  que el pago realmente se ejecuto (no solo que se calculo/libero en el sistema).

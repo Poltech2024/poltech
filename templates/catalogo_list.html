@@ -60,11 +60,18 @@
 {% endif %}
 <div class="card mb-3">
   <form method="get" class="row g-2 align-items-end">
-    <div class="col-md-5">
+    <div class="col-md-4">
       <label class="form-label small mb-1">Filtrar por obra</label>
       <select name="obra_id" class="form-select" onchange="this.form.submit()">
         <option value="">Todas las obras</option>
         {% for o in obras %}<option value="{{ o.id }}" {{ 'selected' if filtro_obra == o.id|string }}>{{ o.nombre }} ({{ o.estado }})</option>{% endfor %}
+      </select>
+    </div>
+    <div class="col-md-4">
+      <label class="form-label small mb-1">Filtrar por clasificacion</label>
+      <select name="clasificacion" class="form-select" onchange="this.form.submit()">
+        <option value="">Todas las clasificaciones</option>
+        {% for c in clasificaciones %}<option value="{{ c }}" {{ 'selected' if filtro_clasif == c }}>{{ c }}</option>{% endfor %}
       </select>
     </div>
     <div class="col-md-3">
