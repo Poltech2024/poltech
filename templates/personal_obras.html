@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block content %}
+<h3 class="mb-1">Obras de {{ emp.nombre }} {{ emp.primer_apellido }} {{ emp.segundo_apellido or '' }}</h3>
+<p class="text-muted small mb-3">Cedula {{ emp.cedula }}. El contrato y los documentos usan siempre el
+  <b>puesto principal</b> (el de su ficha de Personal). Aqui se agregan obras adicionales donde tambien
+  trabaja y cobra, cada una con su propio puesto/sueldo — cada obra calcula y paga su propia semana.</p>
+
+<div class="card mb-4">
+  <div class="card-header bg-white fw-bold text-navy">Asignaciones actuales</div>
+  <table class="table table-sm mb-0 align-middle">
+    <thead><tr><th>Obra</th><th>Puesto</th><th class="text-end">Sueldo semanal</th>
+      <th>Tipo</th><th>Estado</th><th></th></tr></thead>
+    <tbody>
+      {% for a in asignaciones %}
+      <tr class="{% if not a.activo %}text-muted{% endif %}">
+        <td>{{ a.obra }}</td><td>{{ a.puesto }}</td>
+        <td class="text-end">{{ a.sueldo_semanal|money }}</td>
+        <td>{% if a.puesto_id == emp.puesto_id %}<span class="badge text-bg-primary">Principal</span>
+            {% else %}<span class="badge text-bg-light border">Adicional</span>{% endif %}</td>
+        <td>{% if a.activo %}<span class="badge text-bg-success">Activa</span>
+            {% else %}<span class="badge text-bg-secondary">Quitada</span>{% endif %}</td>
+        <td class="text-end">
+          {% if a.activo and a.puesto_id != emp.puesto_id %}
+          <form method="post" action="{{ url_for('personal_obras_quitar', emp_id=emp.id, asig_id=a.id) }}"
+                onsubmit="return confirm('Quitar la asignacion en {{ a.obra }}? Ya no podra registrar asistencia/nomina ahi.');">
+            <button class="btn btn-sm btn-outline-danger">Quitar</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="card p-3" style="max-width:640px">
+  <h6 class="text-navy">Agregar obra adicional</h6>
+  <form method="post" class="row g-2">
+    <div class="col-md-6"><label class="form-label small mb-1">Obra</label>
+      <select id="obra_sel" class="form-select">
+        <option value="">Selecciona la obra...</option>
+        {% for oid, onombre in obras %}<option value="{{ oid }}">{{ onombre }}</option>{% endfor %}
+      </select></div>
+    <div class="col-md-6"><label class="form-label small mb-1">Puesto (categoria de esa obra)</label>
+      <select name="puesto_id" id="puesto_sel" class="form-select" required>
+        <option value="">Primero elige la obra...</option>
+        {% for p in puestos %}
+        <option value="{{ p.id }}" data-obra="{{ p.obra_id }}">
+          {{ p.puesto }} (Sueldo {{ p.sueldo_semanal|money }}/sem, Viaticos {{ p.viaticos_semanales|money }}/sem)
+        </option>
+        {% endfor %}
+      </select></div>
+    <div class="col-12"><button class="btn btn-primary">Agregar asignacion</button></div>
+  </form>
+</div>
+
+<script>
+(function(){
+  var obraSel = document.getElementById("obra_sel");
+  var puestoSel = document.getElementById("puesto_sel");
+  if(!obraSel || !puestoSel) return;
+  function filtrarPuestos(){
+    var obra = obraSel.value;
+    Array.prototype.forEach.call(puestoSel.options, function(op){
+      if(!op.value) return;
+      var match = (op.getAttribute("data-obra") === obra);
+      op.hidden = !match; op.disabled = !match;
+    });
+    var cur = puestoSel.options[puestoSel.selectedIndex];
+    if(!obra || (cur && cur.value && cur.getAttribute("data-obra") !== obra)) puestoSel.value = "";
+  }
+  filtrarPuestos();
+  obraSel.addEventListener("change", filtrarPuestos);
+})();
+</script>
+{% endblock %}

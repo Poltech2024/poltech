@@ -63,6 +63,10 @@
         <td class="text-nowrap">
           <a class="btn btn-sm btn-outline-primary py-0 px-2"
              href="{{ url_for('documentos_empleado', emp_id=e.id) }}" title="Documentos">Docs</a>
+          {% if current_user.rank >= GERENTE_RANK %}
+          <a class="btn btn-sm btn-outline-dark py-0 px-2"
+             href="{{ url_for('personal_obras', emp_id=e.id) }}" title="Obras adicionales">Obras</a>
+          {% endif %}
           {% if current_user.rank >= ADMIN_RANK %}
           <a class="btn btn-sm btn-outline-secondary py-0 px-2"
              href="{{ url_for('personal_editar', emp_id=e.id) }}" title="Editar">&#9998;</a>

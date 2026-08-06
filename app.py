@@ -29,7 +29,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.environ.get("DB_PATH", os.path.join(APP_DIR, "poltech.db"))
 
-APP_VERSION = "1.23"   # version del sistema (visible en el menu)
+APP_VERSION = "1.24"   # version del sistema (visible en el menu)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-cambia-esta-clave-en-render")
@@ -123,6 +123,21 @@ def siguiente_clave_otro_pago(db):
         return "B001"
     num = int(row["clave"][1:])
     return f"B{num + 1:03d}"
+
+
+def asegurar_puesto_asignado(db, empleado_id, puesto_id):
+    """Registra (si no existe) una asignacion activa en empleado_puestos para que
+    calcular_nomina y la plantilla de asistencia lo encuentren en esa obra.
+    Se llama cada vez que se crea o cambia el puesto principal de un empleado."""
+    if not puesto_id:
+        return
+    try:
+        db.execute(
+            "INSERT INTO empleado_puestos(empleado_id, puesto_id, activo, agregado_en) "
+            "VALUES(?,?,1,?)", (empleado_id, puesto_id, date.today().isoformat()))
+    except sqlite3.IntegrityError:
+        db.execute("UPDATE empleado_puestos SET activo=1 WHERE empleado_id=? AND puesto_id=?",
+                   (empleado_id, puesto_id))
 
 
 def resolver_puesto(db, obra_nom):
@@ -386,6 +401,17 @@ CREATE TABLE IF NOT EXISTS reingreso_solicitudes (
     FOREIGN KEY (empleado_id) REFERENCES empleados(id),
     FOREIGN KEY (puesto_id_nuevo) REFERENCES puestos(id)
 );
+CREATE TABLE IF NOT EXISTS empleado_puestos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    empleado_id INTEGER NOT NULL,
+    puesto_id INTEGER NOT NULL,
+    activo INTEGER NOT NULL DEFAULT 1,
+    agregado_en TEXT,
+    agregado_por TEXT,
+    UNIQUE(empleado_id, puesto_id),
+    FOREIGN KEY (empleado_id) REFERENCES empleados(id),
+    FOREIGN KEY (puesto_id) REFERENCES puestos(id)
+);
 CREATE TABLE IF NOT EXISTS bitacora (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     fecha TEXT,
@@ -478,6 +504,15 @@ def init_db():
                 db.execute("INSERT INTO clasificaciones(nombre) VALUES(?)", (nombre,))
             except sqlite3.IntegrityError:
                 pass
+    # Migracion suave: registrar el puesto actual de cada empleado como su asignacion
+    # base en empleado_puestos (permite despues agregarle asignaciones en otras obras).
+    for eid, pid in db.execute(
+            "SELECT id, puesto_id FROM empleados WHERE puesto_id IS NOT NULL").fetchall():
+        try:
+            db.execute("INSERT INTO empleado_puestos(empleado_id, puesto_id, activo, agregado_en) "
+                       "VALUES(?,?,1,?)", (eid, pid, date.today().isoformat()))
+        except sqlite3.IntegrityError:
+            pass
     # Crear usuario administrador la primera vez
     row = db.execute("SELECT COUNT(*) FROM users").fetchone()
     if row[0] == 0:
@@ -2124,6 +2159,7 @@ def personal_editar(emp_id):
              pensionado, autoriza_pension,
              f.get("estatus_docs", "Pendiente de carga"),
              f.get("observaciones", "").strip(), emp_id))
+        asegurar_puesto_asignado(db, emp_id, f.get("puesto_id"))
         if pensionado and not emp["nss_generico"]:
             registrar_bitacora(db, "NSS generico de pensionado",
                                 f"Empleado {emp['cedula']} ({nombre} {ap1}), autorizo: {autoriza_pension}")
@@ -2136,6 +2172,103 @@ def personal_editar(emp_id):
                            estados=ESTADOS, tipos=TIPOS_CUENTA, bancos=BANCOS,
                            estatus_docs=ESTATUS_DOCS, datos=dict(emp),
                            editar=True, emp_id=emp_id)
+
+
+# ---------------------------------------------------------------------------
+# Obras adicionales por empleado: permite que la misma persona (misma cedula,
+# un solo contrato) aparezca en la nomina de mas de una obra a la vez, cada
+# una con su propio puesto/sueldo. Es para control interno, no cambia el
+# puesto principal (el que usa el contrato/documentos/IMSS).
+# ---------------------------------------------------------------------------
+@app.route("/personal/<int:emp_id>/obras", methods=["GET", "POST"])
+@min_rank(GERENTE_RANK)
+def personal_obras(emp_id):
+    db = get_db()
+    emp = db.execute(
+        "SELECT e.*, p.obra_id AS obra_id_principal FROM empleados e "
+        "JOIN puestos p ON p.id=e.puesto_id WHERE e.id=?", (emp_id,)).fetchone()
+    if not emp:
+        abort(404)
+    if not puede_ver_obra(db, emp["obra_id_principal"]):
+        abort(403)
+
+    if request.method == "POST":
+        puesto_id = request.form.get("puesto_id")
+        p = db.execute("SELECT * FROM puestos WHERE id=? AND activo=1", (puesto_id,)).fetchone()
+        if not p:
+            flash("Selecciona un puesto activo valido.", "danger")
+        elif not puede_ver_obra(db, p["obra_id"]):
+            abort(403)
+        else:
+            ya_en_esa_obra = db.execute(
+                "SELECT 1 FROM empleado_puestos ep JOIN puestos p2 ON p2.id=ep.puesto_id "
+                "WHERE ep.empleado_id=? AND ep.activo=1 AND p2.obra_id=?",
+                (emp_id, p["obra_id"])).fetchone()
+            if ya_en_esa_obra:
+                flash("Este trabajador ya tiene una asignacion activa en esa obra.", "warning")
+            else:
+                try:
+                    db.execute(
+                        "INSERT INTO empleado_puestos(empleado_id, puesto_id, activo, agregado_en, "
+                        "agregado_por) VALUES(?,?,1,?,?)",
+                        (emp_id, puesto_id, date.today().isoformat(), session.get("nombre", "")))
+                    registrar_bitacora(db, "Asignacion a obra adicional",
+                                       f"{emp['nombre']} {emp['primer_apellido']} (cedula {emp['cedula']}) "
+                                       f"-> {p['nombre']}")
+                    db.commit()
+                    flash("Asignacion agregada.", "success")
+                except sqlite3.IntegrityError:
+                    flash("Ya tenia esa asignacion registrada (se reactivo).", "info")
+                    db.execute("UPDATE empleado_puestos SET activo=1 WHERE empleado_id=? AND puesto_id=?",
+                               (emp_id, puesto_id))
+                    db.commit()
+        return redirect(url_for("personal_obras", emp_id=emp_id))
+
+    asignaciones = db.execute(
+        "SELECT ep.id, ep.puesto_id, ep.activo, ep.agregado_en, ep.agregado_por, "
+        "p.nombre AS puesto, p.sueldo_semanal, p.viaticos_semanales, o.nombre AS obra, o.id AS obra_id "
+        "FROM empleado_puestos ep JOIN puestos p ON p.id=ep.puesto_id JOIN obras o ON o.id=p.obra_id "
+        "WHERE ep.empleado_id=? ORDER BY ep.activo DESC, o.nombre", (emp_id,)).fetchall()
+    vis = obras_del_usuario(db)
+    if vis is None:
+        puestos_l = db.execute(
+            "SELECT p.id, p.nombre AS puesto, p.sueldo_semanal, p.viaticos_semanales, "
+            "p.obra_id, o.nombre AS obra FROM puestos p JOIN obras o ON o.id=p.obra_id "
+            "WHERE p.activo=1 ORDER BY o.nombre, p.nombre").fetchall()
+    elif vis:
+        ph = ",".join("?" * len(vis))
+        puestos_l = db.execute(
+            "SELECT p.id, p.nombre AS puesto, p.sueldo_semanal, p.viaticos_semanales, "
+            "p.obra_id, o.nombre AS obra FROM puestos p JOIN obras o ON o.id=p.obra_id "
+            f"WHERE p.activo=1 AND p.obra_id IN ({ph}) ORDER BY o.nombre, p.nombre", vis).fetchall()
+    else:
+        puestos_l = []
+    obras_l = list({p["obra_id"]: p["obra"] for p in puestos_l}.items())
+    return render_template("personal_obras.html", emp=emp, asignaciones=asignaciones,
+                           puestos=puestos_l, obras=obras_l)
+
+
+@app.route("/personal/<int:emp_id>/obras/<int:asig_id>/quitar", methods=["POST"])
+@min_rank(GERENTE_RANK)
+def personal_obras_quitar(emp_id, asig_id):
+    db = get_db()
+    emp = db.execute("SELECT * FROM empleados WHERE id=?", (emp_id,)).fetchone()
+    if not emp:
+        abort(404)
+    asig = db.execute("SELECT * FROM empleado_puestos WHERE id=? AND empleado_id=?",
+                      (asig_id, emp_id)).fetchone()
+    if not asig:
+        abort(404)
+    if asig["puesto_id"] == emp["puesto_id"]:
+        flash("No puedes quitar el puesto principal desde aqui; edita al empleado para cambiarlo.",
+              "warning")
+    else:
+        db.execute("UPDATE empleado_puestos SET activo=0 WHERE id=?", (asig_id,))
+        registrar_bitacora(db, "Asignacion a obra adicional quitada",
+                           f"{emp['nombre']} {emp['primer_apellido']} (cedula {emp['cedula']})")
+        db.commit()
+        flash("Asignacion quitada.", "success")
+    return redirect(url_for("personal_obras", emp_id=emp_id))
 
 
 # ---------------------------------------------------------------------------
@@ -2372,6 +2505,7 @@ def personal_nuevo():
              observaciones, "Pendiente de carga"),
         )
         emp_id = cur.lastrowid
+        asegurar_puesto_asignado(db, emp_id, f.get("puesto_id"))
         if cta_num:
             db.execute(
                 "INSERT INTO cuentas_bancarias(empleado_id, institucion, tipo_cuenta, numero) VALUES(?,?,?,?)",
@@ -2577,6 +2711,7 @@ def personal_carga():
                  date.today().isoformat(), salario_final, float(infonavit or 0),
                  0, "", txt(obs), "Pendiente de carga"))
             emp_id = cur.lastrowid
+            asegurar_puesto_asignado(db, emp_id, puesto["id"])
             creados += 1
             creados_detalle.append({
                 "cedula": cedula, "nombre": nombre_completo, "obra": txt(obra_nom),
@@ -3130,6 +3265,7 @@ def reingreso_autorizar(sol_id):
         "WHERE id=?",
         (s["puesto_id_nuevo"], s["fecha_alta_nueva"], date.today().isoformat(), fecha_sol,
          s["empleado_id"]))
+    asegurar_puesto_asignado(db, s["empleado_id"], s["puesto_id_nuevo"])
     if s["numero_cuenta"]:
         ya = db.execute("SELECT 1 FROM cuentas_bancarias WHERE numero=? AND empleado_id=?",
                         (s["numero_cuenta"], s["empleado_id"])).fetchone()
@@ -3475,8 +3611,10 @@ def asistencia_plantilla():
     jueves = viernes + timedelta(days=6)
 
     activos = db.execute(
-        "SELECT e.cedula, e.nombre, e.primer_apellido, e.segundo_apellido, p.nombre AS puesto "
-        "FROM empleados e JOIN puestos p ON p.id=e.puesto_id "
+        "SELECT DISTINCT e.cedula, e.nombre, e.primer_apellido, e.segundo_apellido, p.nombre AS puesto "
+        "FROM empleados e "
+        "JOIN empleado_puestos ep ON ep.empleado_id=e.id AND ep.activo=1 "
+        "JOIN puestos p ON p.id=ep.puesto_id "
         "WHERE p.obra_id=? AND e.estatus='activo' "
         "ORDER BY e.primer_apellido, e.nombre", (obra_id,)).fetchall()
     bajas = db.execute(
@@ -3682,13 +3820,17 @@ def calcular_nomina(db, obra_id, ws, jornada, aplicar_retardos):
         if (ced is None or str(ced).strip() == "") and (nombre is None or str(nombre).strip() == ""):
             break
         cedula = str(ced).strip() if ced else ""
-        # buscar empleado por cedula en la obra
+        # buscar empleado por cedula en la obra: puede tener asignacion en varias obras
+        # a la vez (empleado_puestos), cada una con su propio puesto/sueldo. Se usa la
+        # asignacion activa que corresponda a ESTA obra, no el puesto principal.
         emp = db.execute(
             "SELECT e.id, e.nombre, e.primer_apellido, e.segundo_apellido, e.curp, e.rfc, "
             "e.nss, e.infonavit_monto, e.bono_semanal AS bono_emp, "
             "p.nombre AS puesto, p.clasificacion, "
             "p.sueldo_semanal, p.viaticos_semanales "
-            "FROM empleados e JOIN puestos p ON p.id=e.puesto_id "
+            "FROM empleados e "
+            "JOIN empleado_puestos ep ON ep.empleado_id=e.id AND ep.activo=1 "
+            "JOIN puestos p ON p.id=ep.puesto_id "
             "WHERE e.cedula=? AND p.obra_id=?", (cedula, obra_id)).fetchone()
         if not emp:
             errores.append(f"Cedula '{cedula}' ({nombre}) no se encontro en esta obra; se omitio.")
