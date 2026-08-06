@@ -111,8 +111,9 @@
   </div>
   {% endif %}
 
-  {% if not editar %}
-  <h6 class="text-navy mt-3">Cuenta bancaria (opcional)</h6>
+  <h6 class="text-navy mt-3">Cuenta bancaria
+    ({{ 'opcional' if not editar else ('ya registrada, puedes corregirla' if datos.get('cta_numero')
+        else 'no tiene, puedes agregarla') }})</h6>
   <div class="row g-3 mb-3">
     <div class="col-md-4"><label class="form-label">Institucion (banco)</label>
       <select name="cta_institucion" class="form-select">
@@ -128,7 +129,6 @@
       <input name="cta_numero" class="form-control" value="{{ datos.get('cta_numero','') }}">
       <div class="form-text">No se permiten cuentas duplicadas.</div></div>
   </div>
-  {% endif %}
 
   <div class="mb-3">
     <label class="form-label">Observaciones (opcional)</label>

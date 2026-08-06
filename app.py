@@ -29,7 +29,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.environ.get("DB_PATH", os.path.join(APP_DIR, "poltech.db"))
 
-APP_VERSION = "1.27"   # version del sistema (visible en el menu)
+APP_VERSION = "1.28"   # version del sistema (visible en el menu)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-cambia-esta-clave-en-render")
@@ -2126,6 +2126,34 @@ def personal_editar(emp_id):
             if otro:
                 errores.append(f"Otro trabajador ya tiene ese NSS (cedula {otro['cedula']}).")
 
+        # Cuenta bancaria (opcional): si se captura un numero, se valida y se
+        # actualiza la cuenta existente del empleado o se crea una nueva.
+        cta_num = solo_digitos(f.get("cta_numero", ""))
+        cta_inst = f.get("cta_institucion", "").strip()
+        cta_tipo = f.get("cta_tipo", "").strip()
+        cta_existente = db.execute(
+            "SELECT * FROM cuentas_bancarias WHERE empleado_id=?", (emp_id,)).fetchone()
+        if cta_num:
+            dup = db.execute(
+                "SELECT e.nombre, e.primer_apellido, e.segundo_apellido, e.estatus, e.cedula, "
+                "o.nombre AS obra FROM cuentas_bancarias c "
+                "JOIN empleados e ON e.id=c.empleado_id "
+                "LEFT JOIN puestos p ON p.id=e.puesto_id "
+                "LEFT JOIN obras o ON o.id=p.obra_id "
+                "WHERE c.numero=? AND c.empleado_id<>?", (cta_num, emp_id)).fetchone()
+            if dup:
+                titular = " ".join(x for x in [dup["nombre"], dup["primer_apellido"],
+                                               dup["segundo_apellido"]] if x)
+                errores.append(
+                    f"Esa cuenta ya esta registrada a nombre de {titular} "
+                    f"(cedula {dup['cedula']}, obra {dup['obra'] or '-'}, "
+                    f"estatus {dup['estatus'] or 'activo'}). No se permiten duplicados.")
+            if not cta_inst or not cta_tipo:
+                errores.append("Para la cuenta bancaria, captura institucion y tipo de cuenta.")
+            err_cta = validar_cuenta(cta_tipo, cta_num)
+            if err_cta:
+                errores.append(err_cta)
+
         if errores:
             for e in errores: flash(e, "danger")
             datos = dict(emp); datos.update(f)
@@ -2163,14 +2191,29 @@ def personal_editar(emp_id):
         if pensionado and not emp["nss_generico"]:
             registrar_bitacora(db, "NSS generico de pensionado",
                                 f"Empleado {emp['cedula']} ({nombre} {ap1}), autorizo: {autoriza_pension}")
+        if cta_num:
+            if cta_existente:
+                db.execute(
+                    "UPDATE cuentas_bancarias SET institucion=?, tipo_cuenta=?, numero=? WHERE id=?",
+                    (cta_inst, cta_tipo, cta_num, cta_existente["id"]))
+            else:
+                db.execute(
+                    "INSERT INTO cuentas_bancarias(empleado_id, institucion, tipo_cuenta, numero) "
+                    "VALUES(?,?,?,?)", (emp_id, cta_inst, cta_tipo, cta_num))
         db.commit()
         flash(f"Empleado actualizado (cedula {emp['cedula']}).", "success")
         return redirect(url_for("personal"))
 
+    datos = dict(emp)
+    cta = db.execute("SELECT * FROM cuentas_bancarias WHERE empleado_id=?", (emp_id,)).fetchone()
+    if cta:
+        datos["cta_institucion"] = cta["institucion"]
+        datos["cta_tipo"] = cta["tipo_cuenta"]
+        datos["cta_numero"] = cta["numero"]
     return render_template("personal_form.html", puestos=puestos,
                            obras=obras_form, propuesta_por_obra=propuesta_por_obra,
                            estados=ESTADOS, tipos=TIPOS_CUENTA, bancos=BANCOS,
-                           estatus_docs=ESTATUS_DOCS, datos=dict(emp),
+                           estatus_docs=ESTATUS_DOCS, datos=datos,
                            editar=True, emp_id=emp_id)
 
 
@@ -2539,8 +2582,8 @@ def personal_nuevo():
 COLS_CARGA = ["NOMBRE(S)", "PRIMER APELLIDO", "SEGUNDO APELLIDO", "CURP", "RFC",
               "CP FISCAL", "NSS", "SEXO (H/M)", "FECHA NACIMIENTO (DD-MM-AAAA)",
               "OBRA", "PUESTO (referencia, no se usa)", "FECHA ALTA (DD-MM-AAAA)",
-              "SALARIO ALTA IMSS", "INFONAVIT SEMANAL", "BANCO", "TIPO DE CUENTA",
-              "NUMERO DE CUENTA", "OBSERVACIONES"]
+              "SALARIO ALTA IMSS", "INFONAVIT SEMANAL", "BANCO *", "TIPO DE CUENTA *",
+              "NUMERO DE CUENTA *", "OBSERVACIONES"]
 
 @app.route("/personal/plantilla")
 @login_required
@@ -2641,7 +2684,6 @@ def personal_carga():
         creados = 0
         contratos_gen = 0
         errores = []
-        duplicadas = []   # cuentas bancarias repetidas
         creados_detalle = []   # para que revisen el sueldo de cada quien despues
 
         for i, fila in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
@@ -2681,6 +2723,29 @@ def personal_carga():
             # NSS duplicado
             if nss and db.execute("SELECT 1 FROM empleados WHERE nss=?", (nss,)).fetchone():
                 errs.append("ya existe un trabajador con ese NSS")
+
+            # Cuenta bancaria: obligatoria en la carga masiva (banco, tipo y numero)
+            num_cta = solo_digitos(txt(num_cta))
+            banco_txt = txt(banco)
+            tipo_cta_txt = txt(tipo_cta)
+            if not num_cta or not banco_txt or not tipo_cta_txt:
+                errs.append("falta la cuenta bancaria (banco, tipo de cuenta y numero son obligatorios)")
+            else:
+                err_cta = validar_cuenta(tipo_cta_txt, num_cta)
+                if err_cta:
+                    errs.append(err_cta)
+                else:
+                    dup = db.execute(
+                        "SELECT e.cedula, e.nombre, e.primer_apellido, e.estatus, o.nombre AS obra "
+                        "FROM cuentas_bancarias c JOIN empleados e ON e.id=c.empleado_id "
+                        "LEFT JOIN puestos p ON p.id=e.puesto_id "
+                        "LEFT JOIN obras o ON o.id=p.obra_id WHERE c.numero=?",
+                        (num_cta,)).fetchone()
+                    if dup:
+                        titular = f"{dup['nombre']} {dup['primer_apellido']}".strip()
+                        errs.append(
+                            f"la cuenta {num_cta} ya pertenece a {titular} (cedula {dup['cedula']}, "
+                            f"obra {dup['obra'] or '-'}, estatus {dup['estatus'] or 'activo'})")
 
             if errs:
                 errores.append(f"Fila {i} ({nombre_completo}): " + "; ".join(errs))
@@ -2723,37 +2788,14 @@ def personal_carga():
             except Exception as e:
                 app.logger.error("Contrato en carga (fila %s): %s", i, e)
 
-            # cuenta bancaria (opcional): revisar duplicado antes de insertar
-            num_cta = solo_digitos(txt(num_cta))
-            if num_cta:
-                dup = db.execute(
-                    "SELECT e.cedula, e.nombre, e.primer_apellido, e.estatus, o.nombre AS obra "
-                    "FROM cuentas_bancarias c JOIN empleados e ON e.id=c.empleado_id "
-                    "LEFT JOIN puestos p ON p.id=e.puesto_id "
-                    "LEFT JOIN obras o ON o.id=p.obra_id WHERE c.numero=?",
-                    (num_cta,)).fetchone()
-                if dup:
-                    titular = f"{dup['nombre']} {dup['primer_apellido']}".strip()
-                    duplicadas.append(
-                        f"Fila {i}: la cuenta {num_cta} de {nombre} {ap1} ya pertenece a "
-                        f"{titular} (cedula {dup['cedula']}, obra {dup['obra'] or '-'}, "
-                        f"estatus {dup['estatus'] or 'activo'}). No se guardo la cuenta.")
-                else:
-                    db.execute(
-                        "INSERT INTO cuentas_bancarias(empleado_id, institucion, tipo_cuenta, numero) "
-                        "VALUES(?,?,?,?)", (emp_id, txt(banco), txt(tipo_cta), num_cta))
+            db.execute(
+                "INSERT INTO cuentas_bancarias(empleado_id, institucion, tipo_cuenta, numero) "
+                "VALUES(?,?,?,?)", (emp_id, banco_txt, tipo_cta_txt, num_cta))
 
         db.commit()
 
-        if duplicadas:
-            send_admin_alert(
-                "POLTECH - Cuentas bancarias duplicadas en carga masiva",
-                "Durante una carga masiva se detectaron cuentas repetidas:\n\n" +
-                "\n".join(duplicadas))
-
         resumen = {"creados": creados, "contratos": contratos_gen,
-                   "errores": errores, "duplicadas": duplicadas,
-                   "creados_detalle": creados_detalle}
+                   "errores": errores, "creados_detalle": creados_detalle}
         return render_template("personal_carga.html", resumen=resumen)
 
     return render_template("personal_carga.html", resumen=None)
@@ -3673,6 +3715,145 @@ def cuenta_editar(cid):
         flash("Cuenta bancaria actualizada.", "success")
         return redirect(url_for("cuentas"))
     return render_template("cuenta_form.html", c=c, bancos=BANCOS, tipos=TIPOS_CUENTA)
+
+
+def empleados_sin_cuenta(db):
+    """Empleados activos (visibles para el usuario en sesion) que no tienen
+    ninguna cuenta bancaria registrada."""
+    sql = ("SELECT e.id, e.cedula, e.nombre, e.primer_apellido, e.segundo_apellido, "
+           "p.nombre AS puesto, o.nombre AS obra "
+           "FROM empleados e "
+           "LEFT JOIN puestos p ON p.id=e.puesto_id "
+           "LEFT JOIN obras o ON o.id=p.obra_id "
+           "WHERE e.estatus='activo' "
+           "AND NOT EXISTS (SELECT 1 FROM cuentas_bancarias c WHERE c.empleado_id=e.id)")
+    args = []
+    vis = obras_del_usuario(db)
+    if vis is not None:
+        if vis:
+            ph = ",".join("?" * len(vis))
+            sql += f" AND o.id IN ({ph})"; args += vis
+        else:
+            sql += " AND 1=0"
+    sql += " ORDER BY o.nombre, e.primer_apellido, e.nombre"
+    return db.execute(sql, args).fetchall()
+
+
+COLS_CARGA_CUENTAS = ["CEDULA", "TRABAJADOR", "OBRA", "PUESTO", "BANCO", "TIPO DE CUENTA", "NUMERO DE CUENTA"]
+
+
+@app.route("/cuentas/plantilla")
+@min_rank(ADMIN_RANK)
+def cuentas_plantilla():
+    db = get_db()
+    faltantes = empleados_sin_cuenta(db)
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Cuentas bancarias"
+    ws.append(COLS_CARGA_CUENTAS)
+    from openpyxl.styles import Font, PatternFill
+    for c in ws[1]:
+        c.font = Font(bold=True, color="FFFFFF")
+        c.fill = PatternFill("solid", fgColor="16233C")
+    for e in faltantes:
+        nom = " ".join(x for x in [e["primer_apellido"], e["segundo_apellido"], e["nombre"]] if x)
+        ws.append([e["cedula"], nom, e["obra"] or "", e["puesto"] or "", "", "", ""])
+    anchos = [12, 30, 22, 22, 18, 20, 20]
+    for i, w in enumerate(anchos, start=1):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
+
+    from openpyxl.workbook.defined_name import DefinedName
+    from openpyxl.worksheet.datavalidation import DataValidation
+    lst = wb.create_sheet("Listas")
+    lst.sheet_state = "hidden"
+
+    def nombrar_rango(nombre, ref):
+        wb.defined_names[nombre] = DefinedName(nombre, attr_text=ref)
+
+    for idx, b in enumerate(BANCOS, start=1):
+        lst.cell(row=idx, column=1, value=b)
+    nombrar_rango("ListaBancosCta", f"Listas!$A$1:$A${len(BANCOS)}")
+    for idx, t in enumerate(TIPOS_CUENTA, start=1):
+        lst.cell(row=idx, column=2, value=t)
+    nombrar_rango("ListaTipoCuentaCta", f"Listas!$B$1:$B${len(TIPOS_CUENTA)}")
+
+    ultima_fila = max(len(faltantes) + 1, 500)
+    dv_banco = DataValidation(type="list", formula1="ListaBancosCta", allow_blank=True, showErrorMessage=False)
+    ws.add_data_validation(dv_banco)
+    dv_banco.add(f"E2:E{ultima_fila}")
+    dv_tipo = DataValidation(type="list", formula1="ListaTipoCuentaCta", allow_blank=True, showErrorMessage=False)
+    ws.add_data_validation(dv_tipo)
+    dv_tipo.add(f"F2:F{ultima_fila}")
+
+    buf = io.BytesIO(); wb.save(buf); buf.seek(0)
+    return send_file(buf, as_attachment=True, download_name="Plantilla_cuentas_bancarias.xlsx",
+                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
+@app.route("/cuentas/carga", methods=["GET", "POST"])
+@min_rank(ADMIN_RANK)
+def cuentas_carga():
+    db = get_db()
+    if request.method == "POST":
+        archivo = request.files.get("archivo")
+        if not archivo or not archivo.filename.lower().endswith(".xlsx"):
+            flash("Sube un archivo de Excel (.xlsx) usando la plantilla.", "danger")
+            return render_template("cuentas_carga.html", resumen=None,
+                                   faltantes=empleados_sin_cuenta(db))
+
+        wb = openpyxl.load_workbook(archivo, data_only=True)
+        ws = wb.active
+        creados = 0
+        errores = []
+
+        for i, fila in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+            if fila is None or all(c is None or str(c).strip() == "" for c in fila):
+                continue
+            vals = (list(fila) + [None] * len(COLS_CARGA_CUENTAS))[:len(COLS_CARGA_CUENTAS)]
+            cedula, nom_ref, obra_ref, puesto_ref, banco, tipo_cta, numero = vals
+
+            def txt(x): return "" if x is None else str(x).strip()
+            cedula = txt(cedula).upper()
+            banco_txt, tipo_cta_txt = txt(banco), txt(tipo_cta)
+            numero = solo_digitos(txt(numero))
+            etiqueta = f"{cedula} ({txt(nom_ref) or 'sin nombre'})"
+
+            if not cedula:
+                errores.append(f"Fila {i}: falta la cedula."); continue
+            emp = db.execute(
+                "SELECT id, nombre, primer_apellido FROM empleados WHERE cedula=? AND estatus='activo'",
+                (cedula,)).fetchone()
+            if not emp:
+                errores.append(f"Fila {i} ({etiqueta}): no existe un trabajador activo con esa cedula."); continue
+            if db.execute("SELECT 1 FROM cuentas_bancarias WHERE empleado_id=?", (emp["id"],)).fetchone():
+                errores.append(f"Fila {i} ({etiqueta}): ya tiene una cuenta registrada, no se modifico "
+                                "(editala desde Cuentas bancarias si hay que corregirla).")
+                continue
+            if not numero or not banco_txt or not tipo_cta_txt:
+                errores.append(f"Fila {i} ({etiqueta}): falta banco, tipo de cuenta o numero."); continue
+            err_cta = validar_cuenta(tipo_cta_txt, numero)
+            if err_cta:
+                errores.append(f"Fila {i} ({etiqueta}): {err_cta}"); continue
+            dup = db.execute(
+                "SELECT e.cedula, e.nombre, e.primer_apellido FROM cuentas_bancarias c "
+                "JOIN empleados e ON e.id=c.empleado_id WHERE c.numero=?", (numero,)).fetchone()
+            if dup:
+                errores.append(f"Fila {i} ({etiqueta}): la cuenta {numero} ya pertenece a "
+                                f"{dup['nombre']} {dup['primer_apellido']} (cedula {dup['cedula']}).")
+                continue
+
+            db.execute(
+                "INSERT INTO cuentas_bancarias(empleado_id, institucion, tipo_cuenta, numero) VALUES(?,?,?,?)",
+                (emp["id"], banco_txt, tipo_cta_txt, numero))
+            creados += 1
+
+        db.commit()
+        resumen = {"creados": creados, "errores": errores}
+        return render_template("cuentas_carga.html", resumen=resumen,
+                               faltantes=empleados_sin_cuenta(db))
+
+    return render_template("cuentas_carga.html", resumen=None, faltantes=empleados_sin_cuenta(db))
+
 
 # ---------------------------------------------------------------------------
 # Asistencia semanal (Fase 2)

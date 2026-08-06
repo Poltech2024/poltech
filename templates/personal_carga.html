@@ -19,6 +19,8 @@
     La columna <b>Puesto</b> ya no se usa para elegir el puesto: se asigna automaticamente el de <b>menor
     sueldo</b> de esa obra, y despues revisas/ajustas el sueldo de cada quien (esa columna solo queda de referencia).
     La <b>cedula</b> se genera automaticamente para cada trabajador nuevo.
+    La <b>cuenta bancaria</b> (banco, tipo de cuenta y numero) es obligatoria: si falta o esta
+    repetida, esa fila se rechaza.
   </div>
 </div>
 
@@ -47,14 +49,6 @@
   </div>
   {% endif %}
 
-  {% if resumen.duplicadas %}
-  <div class="alert alert-warning">
-    <b>Cuentas bancarias duplicadas ({{ resumen.duplicadas|length }}):</b>
-    <ul class="mb-0">{% for d in resumen.duplicadas %}<li>{{ d }}</li>{% endfor %}</ul>
-    <div class="small mt-1">Se aviso al administrador. El trabajador se creo, pero sin la cuenta repetida.</div>
-  </div>
-  {% endif %}
-
   {% if resumen.errores %}
   <div class="alert alert-danger">
     <b>Filas con error ({{ resumen.errores|length }}) &mdash; no se cargaron:</b>
@@ -62,7 +56,7 @@
   </div>
   {% endif %}
 
-  {% if not resumen.errores and not resumen.duplicadas %}
+  {% if not resumen.errores %}
   <div class="alert alert-success mb-0">Todo se cargo sin problemas.</div>
   {% endif %}
 </div>

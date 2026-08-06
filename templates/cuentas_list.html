@@ -1,7 +1,12 @@
 {% extends "base.html" %}
 {% block content %}
-<h3 class="mb-3">Cuentas bancarias</h3>
-<p class="text-muted small">Las cuentas se registran al dar de alta al empleado. No se permiten numeros duplicados.</p>
+<div class="d-flex justify-content-between align-items-center mb-1">
+  <h3 class="mb-0">Cuentas bancarias</h3>
+  {% if current_user.rank >= ADMIN_RANK %}
+  <a class="btn btn-outline-primary" href="{{ url_for('cuentas_carga') }}">Carga masiva de cuentas faltantes</a>
+  {% endif %}
+</div>
+<p class="text-muted small">Las cuentas se registran al dar de alta al empleado, al editarlo, o por carga masiva. No se permiten numeros duplicados.</p>
 
 <form method="get" class="row g-2 mb-3" style="max-width:520px">
   <div class="col-9"><input name="q" class="form-control form-control-sm"

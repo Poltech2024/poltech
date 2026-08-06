@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h3 class="mb-0">Carga masiva de cuentas bancarias</h3>
+  <a class="btn btn-outline-secondary" href="{{ url_for('cuentas') }}">Volver a Cuentas bancarias</a>
+</div>
+
+<div class="card p-4 mb-3">
+  <p class="text-muted mb-2">
+    1. Descarga la plantilla (ya trae la cedula y el nombre de quienes no tienen cuenta) &middot;
+    2. Llena banco, tipo de cuenta y numero &middot; 3. Subela aqui.
+  </p>
+  <div class="mb-3">
+    <a class="btn btn-primary" href="{{ url_for('cuentas_plantilla') }}">
+      Descargar plantilla ({{ faltantes|length }} trabajador{{ 's' if faltantes|length != 1 else '' }} sin cuenta)</a>
+  </div>
+  <form method="post" enctype="multipart/form-data" class="row g-2 align-items-center">
+    <div class="col-md-6"><input type="file" name="archivo" accept=".xlsx" class="form-control" required></div>
+    <div class="col-md-3"><button class="btn btn-primary w-100">Subir y procesar</button></div>
+  </form>
+  <div class="form-text mt-2">
+    Se busca al trabajador por su <b>cedula</b>. Si ya tiene una cuenta registrada, esa fila se
+    omite (no se sobreescribe); para corregir una cuenta existente usa "Editar" desde Cuentas bancarias.
+  </div>
+</div>
+
+{% if resumen %}
+<div class="card p-4 mb-3">
+  <h5 class="text-navy">Resultado</h5>
+  <p class="mb-2"><b>{{ resumen.creados }}</b> cuentas bancarias creadas.</p>
+
+  {% if resumen.errores %}
+  <div class="alert alert-danger">
+    <b>Filas con error u omitidas ({{ resumen.errores|length }}):</b>
+    <ul class="mb-0">{% for e in resumen.errores %}<li>{{ e }}</li>{% endfor %}</ul>
+  </div>
+  {% endif %}
+
+  {% if not resumen.errores %}
+  <div class="alert alert-success mb-0">Todo se cargo sin problemas.</div>
+  {% endif %}
+</div>
+{% endif %}
+
+{% if faltantes %}
+<div class="card">
+  <div class="card-header bg-white fw-bold text-navy">Trabajadores activos sin cuenta bancaria ({{ faltantes|length }})</div>
+  <div class="table-responsive">
+    <table class="table table-sm mb-0 align-middle">
+      <thead><tr><th>Cedula</th><th>Trabajador</th><th>Obra</th><th>Puesto</th></tr></thead>
+      <tbody>
+        {% for e in faltantes %}
+        <tr>
+          <td><b>{{ e.cedula }}</b></td>
+          <td>{{ e.primer_apellido }} {{ e.segundo_apellido or '' }} {{ e.nombre }}</td>
+          <td class="small">{{ e.obra or '-' }}</td>
+          <td class="small">{{ e.puesto or '-' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<div class="alert alert-success">Todos los trabajadores activos ya tienen cuenta bancaria registrada.</div>
+{% endif %}
+{% endblock %}
