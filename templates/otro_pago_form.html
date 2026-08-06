@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block content %}
+<h3 class="mb-1">Editar {{ r.clave }}</h3>
+<p class="text-muted small mb-3">Otros pagos semanales (solo Administrador).</p>
+<div class="card p-4" style="max-width:640px">
+  <form method="post" class="row g-3">
+    <div class="col-md-6"><label class="form-label">Nombre</label>
+      <input name="nombre" class="form-control" value="{{ r.nombre }}" required></div>
+    <div class="col-md-6"><label class="form-label">Monto semanal</label>
+      <div class="input-group"><span class="input-group-text">$</span>
+        <input name="monto_semanal" type="number" step="0.01" class="form-control" value="{{ r.monto_semanal }}" required></div></div>
+    <div class="col-md-6"><label class="form-label">Banco</label>
+      <select name="banco" class="form-select">
+        <option value="">-</option>
+        {% for b in bancos %}<option {{ 'selected' if r.banco==b }}>{{ b }}</option>{% endfor %}
+      </select></div>
+    <div class="col-md-3"><label class="form-label">Tipo de cuenta</label>
+      <select name="tipo_cuenta" class="form-select">
+        <option value="">-</option>
+        {% for t in tipos %}<option {{ 'selected' if r.tipo_cuenta==t }}>{{ t }}</option>{% endfor %}
+      </select></div>
+    <div class="col-md-3"><label class="form-label">No. de cuenta</label>
+      <input name="numero_cuenta" class="form-control" value="{{ r.numero_cuenta or '' }}"></div>
+    <div class="col-12 d-flex gap-2">
+      <button class="btn btn-primary">Guardar cambios</button>
+      <a class="btn btn-outline-secondary" href="{{ url_for('otros_pagos') }}">Cancelar</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

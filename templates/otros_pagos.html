@@ -39,7 +39,8 @@
         <td>{{ r.tipo_cuenta or '-' }}</td><td>{{ r.numero_cuenta or '-' }}</td>
         <td class="text-end">{{ r.monto_semanal|money }}</td>
         <td>{% if r.activo %}<span class="badge text-bg-success">Activo</span>{% else %}<span class="badge text-bg-secondary">Inactivo</span>{% endif %}</td>
-        <td class="text-end">
+        <td class="text-end d-flex gap-1 justify-content-end">
+          <a class="btn btn-sm btn-outline-primary" href="{{ url_for('otro_pago_editar', otro_id=r.id) }}">Editar</a>
           {% if r.activo %}
           <form method="post" action="{{ url_for('otro_pago_desactivar', otro_id=r.id) }}"
                 onsubmit="return confirm('Desactivar a {{ r.nombre }}? Ya no se incluira en los proximos lotes.');">

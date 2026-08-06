@@ -29,7 +29,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.environ.get("DB_PATH", os.path.join(APP_DIR, "poltech.db"))
 
-APP_VERSION = "1.18"   # version del sistema (visible en el menu)
+APP_VERSION = "1.19"   # version del sistema (visible en el menu)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-cambia-esta-clave-en-render")
@@ -4010,6 +4010,31 @@ def otro_pago_reactivar(otro_id):
     db.commit()
     flash("Reactivado.", "success")
     return redirect(url_for("otros_pagos"))
+
+
+@app.route("/otro-pago/<int:otro_id>/editar", methods=["GET", "POST"])
+@min_rank(ADMIN_RANK)
+def otro_pago_editar(otro_id):
+    db = get_db()
+    r = db.execute("SELECT * FROM otros_pagos WHERE id=?", (otro_id,)).fetchone()
+    if not r:
+        abort(404)
+    if request.method == "POST":
+        nombre = request.form.get("nombre", "").strip()
+        if not nombre:
+            flash("Escribe el nombre.", "warning")
+            return render_template("otro_pago_form.html", r=r, bancos=BANCOS, tipos=TIPOS_CUENTA)
+        db.execute(
+            "UPDATE otros_pagos SET nombre=?, banco=?, tipo_cuenta=?, numero_cuenta=?, "
+            "monto_semanal=? WHERE id=?",
+            (titulo(nombre), request.form.get("banco", "").strip(),
+             request.form.get("tipo_cuenta", "").strip(),
+             solo_digitos(request.form.get("numero_cuenta", "")),
+             float(request.form.get("monto_semanal") or 0), otro_id))
+        db.commit()
+        flash(f"'{titulo(nombre)}' actualizado.", "success")
+        return redirect(url_for("otros_pagos"))
+    return render_template("otro_pago_form.html", r=r, bancos=BANCOS, tipos=TIPOS_CUENTA)
 
 
 @app.route("/nomina/<int:nomina_id>/otros-pagos/generar", methods=["POST"])
