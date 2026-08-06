@@ -29,7 +29,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.environ.get("DB_PATH", os.path.join(APP_DIR, "poltech.db"))
 
-APP_VERSION = "1.22"   # version del sistema (visible en el menu)
+APP_VERSION = "1.23"   # version del sistema (visible en el menu)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-cambia-esta-clave-en-render")
@@ -367,6 +367,24 @@ CREATE TABLE IF NOT EXISTS otros_pagos_lotes (
     generado_en TEXT,
     detalle_json TEXT,
     UNIQUE(anio, semana_num)
+);
+CREATE TABLE IF NOT EXISTS reingreso_solicitudes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    empleado_id INTEGER NOT NULL,
+    puesto_id_nuevo INTEGER NOT NULL,
+    fecha_alta_nueva TEXT NOT NULL,
+    banco TEXT,
+    tipo_cuenta TEXT,
+    numero_cuenta TEXT,
+    motivo TEXT,
+    estatus TEXT DEFAULT 'pendiente',
+    solicitado_por TEXT,
+    solicitado_en TEXT,
+    autorizado_por TEXT,
+    autorizado_en TEXT,
+    comentario_resolucion TEXT,
+    FOREIGN KEY (empleado_id) REFERENCES empleados(id),
+    FOREIGN KEY (puesto_id_nuevo) REFERENCES puestos(id)
 );
 CREATE TABLE IF NOT EXISTS bitacora (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2973,21 +2991,191 @@ def escrito_baja(emp_id):
                      mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
 
 
-@app.route("/personal/<int:emp_id>/reactivar", methods=["POST"])
-@min_rank(GERENTE_RANK)
-def personal_reactivar(emp_id):
+@app.route("/personal/<int:emp_id>/reingreso/solicitar", methods=["GET", "POST"])
+@login_required
+def reingreso_solicitar(emp_id):
+    """Cualquiera con visibilidad de la obra puede solicitar el reingreso de un
+    trabajador dado de baja. Queda pendiente hasta que un superintendente o
+    administrador lo autorice (ver reingreso_autorizar)."""
     db = get_db()
     emp = _emp_para_baja(db, emp_id)
     if not emp:
         abort(404)
     if not puede_ver_obra(db, emp["obra_id"]):
         abort(403)
-    db.execute("UPDATE empleados SET estatus='activo', fecha_baja=NULL, motivo_baja=NULL WHERE id=?", (emp_id,))
-    registrar_bitacora(db, "Reingreso de trabajador",
-                       f"{emp['nombre']} {emp['primer_apellido']} (cedula {emp['cedula']}) reactivado")
+    if emp["estatus"] != "baja":
+        flash("Este trabajador ya no esta dado de baja.", "warning")
+        return redirect(url_for("bajas"))
+    pendiente = db.execute(
+        "SELECT 1 FROM reingreso_solicitudes WHERE empleado_id=? AND estatus='pendiente'",
+        (emp_id,)).fetchone()
+    if pendiente:
+        flash("Ya existe una solicitud de reingreso pendiente para este trabajador.", "warning")
+        return redirect(url_for("bajas"))
+
+    obras_form = obras_visibles(db)
+    vis = obras_del_usuario(db)
+    if vis is None:
+        puestos = db.execute(
+            "SELECT p.id, p.nombre AS puesto, p.sueldo_semanal, p.viaticos_semanales, "
+            "p.obra_id, o.nombre AS obra, o.estado FROM puestos p JOIN obras o ON o.id=p.obra_id "
+            "WHERE p.activo=1 ORDER BY o.nombre, p.nombre").fetchall()
+    elif vis:
+        ph = ",".join("?" * len(vis))
+        puestos = db.execute(
+            "SELECT p.id, p.nombre AS puesto, p.sueldo_semanal, p.viaticos_semanales, "
+            "p.obra_id, o.nombre AS obra, o.estado FROM puestos p JOIN obras o ON o.id=p.obra_id "
+            f"WHERE p.activo=1 AND p.obra_id IN ({ph}) ORDER BY o.nombre, p.nombre", vis).fetchall()
+    else:
+        puestos = []
+
+    if request.method == "POST":
+        puesto_id = request.form.get("puesto_id")
+        fecha_alta_nueva = request.form.get("fecha_alta_nueva", "").strip()
+        errores = []
+        if not puesto_id or puesto_id not in {str(p["id"]) for p in puestos}:
+            errores.append("Selecciona un puesto (obra + categoria) valido.")
+        if not fecha_alta_nueva:
+            errores.append("La fecha de alta es obligatoria.")
+        cta_num = solo_digitos(request.form.get("numero_cuenta", ""))
+        cta_tipo = request.form.get("tipo_cuenta", "")
+        if cta_num:
+            err_cta = validar_cuenta(cta_tipo, cta_num)
+            if err_cta:
+                errores.append(err_cta)
+        if errores:
+            for e in errores:
+                flash(e, "danger")
+            return render_template("reingreso_form.html", emp=emp, puestos=puestos,
+                                   obras=obras_form, bancos=BANCOS, tipos=TIPOS_CUENTA,
+                                   datos=request.form)
+        db.execute(
+            "INSERT INTO reingreso_solicitudes(empleado_id, puesto_id_nuevo, fecha_alta_nueva, "
+            "banco, tipo_cuenta, numero_cuenta, motivo, estatus, solicitado_por, solicitado_en) "
+            "VALUES(?,?,?,?,?,?,?,'pendiente',?,?)",
+            (emp_id, puesto_id, fecha_alta_nueva,
+             request.form.get("banco", "").strip(), cta_tipo, cta_num,
+             request.form.get("motivo", "").strip(),
+             session.get("nombre", ""), datetime.now().isoformat(timespec="seconds")))
+        registrar_bitacora(db, "Reingreso solicitado",
+                           f"{emp['nombre']} {emp['primer_apellido']} (cedula {emp['cedula']})")
+        db.commit()
+        send_admin_alert(
+            "POLTECH - Solicitud de reingreso pendiente de autorizar",
+            (f"{session.get('nombre', '')} solicito el reingreso de "
+             f"{emp['nombre']} {emp['primer_apellido']} (cedula {emp['cedula']}).\n"
+             f"Revisa y autoriza (o rechaza) en Solicitudes de reingreso."))
+        flash("Solicitud de reingreso enviada. Un superintendente o administrador debe autorizarla.",
+              "success")
+        return redirect(url_for("bajas"))
+    return render_template("reingreso_form.html", emp=emp, puestos=puestos,
+                           obras=obras_form, bancos=BANCOS, tipos=TIPOS_CUENTA, datos={})
+
+
+@app.route("/reingresos")
+@login_required
+def reingresos():
+    db = get_db()
+    vis = obras_del_usuario(db)
+    sql = ("SELECT s.*, e.cedula, e.nombre, e.primer_apellido, e.segundo_apellido, "
+           "e.fecha_baja, e.motivo_baja, p.nombre AS puesto_nuevo, o.nombre AS obra_nueva, "
+           "o.id AS obra_id FROM reingreso_solicitudes s "
+           "JOIN empleados e ON e.id=s.empleado_id "
+           "JOIN puestos p ON p.id=s.puesto_id_nuevo JOIN obras o ON o.id=p.obra_id "
+           "WHERE 1=1")
+    args = []
+    if vis is not None:
+        if vis:
+            sql += " AND o.id IN (%s)" % ",".join("?" * len(vis)); args += vis
+        else:
+            sql += " AND 0"
+    sql += " ORDER BY (s.estatus='pendiente') DESC, s.solicitado_en DESC"
+    filas = db.execute(sql, args).fetchall()
+    return render_template("reingresos_list.html", solicitudes=filas)
+
+
+@app.route("/reingreso/<int:sol_id>/autorizar", methods=["POST"])
+@min_rank(GERENTE_RANK)
+def reingreso_autorizar(sol_id):
+    db = get_db()
+    s = db.execute(
+        "SELECT s.*, p.obra_id, o.estado AS obra_estado FROM reingreso_solicitudes s "
+        "JOIN puestos p ON p.id=s.puesto_id_nuevo JOIN obras o ON o.id=p.obra_id WHERE s.id=?",
+        (sol_id,)).fetchone()
+    if not s:
+        abort(404)
+    if not puede_ver_obra(db, s["obra_id"]):
+        abort(403)
+    if s["estatus"] != "pendiente":
+        flash("Esta solicitud ya fue resuelta.", "warning")
+        return redirect(url_for("reingresos"))
+    emp = db.execute("SELECT * FROM empleados WHERE id=?", (s["empleado_id"],)).fetchone()
+
+    # Cuenta bancaria propuesta: si el numero ya es de OTRO trabajador, no se procesa el
+    # reingreso (misma proteccion que en el alta nueva).
+    if s["numero_cuenta"]:
+        dup = db.execute(
+            "SELECT e.nombre, e.primer_apellido, e.cedula FROM cuentas_bancarias c "
+            "JOIN empleados e ON e.id=c.empleado_id "
+            "WHERE c.numero=? AND c.empleado_id<>?", (s["numero_cuenta"], s["empleado_id"])).fetchone()
+        if dup:
+            flash(f"No se autorizo: la cuenta {s['numero_cuenta']} ya esta registrada a nombre de "
+                  f"{dup['nombre']} {dup['primer_apellido']} (cedula {dup['cedula']}).", "danger")
+            return redirect(url_for("reingresos"))
+
+    fecha_sol = (date.fromisoformat(s["fecha_alta_nueva"]) - timedelta(days=5)).isoformat()
+    db.execute(
+        "UPDATE empleados SET estatus='activo', fecha_baja=NULL, motivo_baja=NULL, "
+        "puesto_id=?, fecha_alta=?, fecha_registro=?, fecha_solicitud=?, estatus_docs='Pendiente de carga' "
+        "WHERE id=?",
+        (s["puesto_id_nuevo"], s["fecha_alta_nueva"], date.today().isoformat(), fecha_sol,
+         s["empleado_id"]))
+    if s["numero_cuenta"]:
+        ya = db.execute("SELECT 1 FROM cuentas_bancarias WHERE numero=? AND empleado_id=?",
+                        (s["numero_cuenta"], s["empleado_id"])).fetchone()
+        if not ya:
+            db.execute(
+                "INSERT INTO cuentas_bancarias(empleado_id, institucion, tipo_cuenta, numero) "
+                "VALUES(?,?,?,?)", (s["empleado_id"], s["banco"], s["tipo_cuenta"], s["numero_cuenta"]))
+    db.execute(
+        "UPDATE reingreso_solicitudes SET estatus='aprobado', autorizado_por=?, autorizado_en=? "
+        "WHERE id=?", (session.get("nombre", ""), datetime.now().isoformat(timespec="seconds"), sol_id))
+    registrar_bitacora(db, "Reingreso autorizado",
+                       f"{emp['nombre']} {emp['primer_apellido']} (cedula {emp['cedula']})")
     db.commit()
-    flash("Trabajador reactivado.", "success")
-    return redirect(url_for("bajas"))
+    try:
+        crear_contrato_para(db, s["empleado_id"], avisar_a=session.get("username"))
+        db.commit()
+    except Exception as e:
+        app.logger.error("Contrato de reingreso (emp %s): %s", s["empleado_id"], e)
+    flash(f"Reingreso autorizado. Se genero un contrato nuevo y arrancan los 15 dias para "
+          f"completar documentacion.", "success")
+    return redirect(url_for("reingresos"))
+
+
+@app.route("/reingreso/<int:sol_id>/rechazar", methods=["POST"])
+@min_rank(GERENTE_RANK)
+def reingreso_rechazar(sol_id):
+    db = get_db()
+    s = db.execute(
+        "SELECT s.*, p.obra_id FROM reingreso_solicitudes s "
+        "JOIN puestos p ON p.id=s.puesto_id_nuevo WHERE s.id=?", (sol_id,)).fetchone()
+    if not s:
+        abort(404)
+    if not puede_ver_obra(db, s["obra_id"]):
+        abort(403)
+    if s["estatus"] != "pendiente":
+        flash("Esta solicitud ya fue resuelta.", "warning")
+        return redirect(url_for("reingresos"))
+    db.execute(
+        "UPDATE reingreso_solicitudes SET estatus='rechazado', autorizado_por=?, autorizado_en=?, "
+        "comentario_resolucion=? WHERE id=?",
+        (session.get("nombre", ""), datetime.now().isoformat(timespec="seconds"),
+         request.form.get("comentario", "").strip(), sol_id))
+    registrar_bitacora(db, "Reingreso rechazado", f"Solicitud {sol_id}")
+    db.commit()
+    flash("Solicitud de reingreso rechazada.", "success")
+    return redirect(url_for("reingresos"))
 
 
 @app.route("/bajas")
@@ -3018,8 +3206,11 @@ def bajas():
     sql += " ORDER BY e.fecha_baja DESC, e.primer_apellido"
     filas = db.execute(sql, args).fetchall()
     obras_l = obras_visibles(db)
+    con_solicitud = {r["empleado_id"] for r in db.execute(
+        "SELECT empleado_id FROM reingreso_solicitudes WHERE estatus='pendiente'").fetchall()}
     return render_template("bajas.html", bajas=filas, obras=obras_l,
-                           f_obra=f_obra, f_desde=f_desde, f_hasta=f_hasta)
+                           f_obra=f_obra, f_desde=f_desde, f_hasta=f_hasta,
+                           con_solicitud=con_solicitud)
 
 
 @app.route("/bajas/excel")

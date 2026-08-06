@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block content %}
+<h3 class="mb-3">Solicitudes de reingreso</h3>
+
+<div class="card">
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead>
+        <tr><th>Trabajador</th><th>Baja</th><th>Obra / Puesto nuevo</th><th>Fecha alta nueva</th>
+          <th>Motivo</th><th>Solicito</th><th>Estatus</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for s in solicitudes %}
+        <tr>
+          <td><b>{{ s.primer_apellido }} {{ s.segundo_apellido or '' }} {{ s.nombre }}</b>
+            <span class="text-muted small">{{ s.cedula }}</span></td>
+          <td class="small">{{ s.fecha_baja }}<br><span class="text-muted">{{ s.motivo_baja or '' }}</span></td>
+          <td class="small">{{ s.obra_nueva }}<br>{{ s.puesto_nuevo }}</td>
+          <td class="small">{{ s.fecha_alta_nueva }}</td>
+          <td class="small">{{ s.motivo or '-' }}</td>
+          <td class="small text-muted">{{ s.solicitado_por }}<br>{{ s.solicitado_en[:16] if s.solicitado_en else '' }}</td>
+          <td>
+            {% if s.estatus == 'pendiente' %}<span class="badge text-bg-warning text-dark">Pendiente</span>
+            {% elif s.estatus == 'aprobado' %}<span class="badge text-bg-success">Aprobado</span>
+            {% else %}<span class="badge text-bg-secondary">Rechazado</span>{% endif %}
+            {% if s.estatus != 'pendiente' %}
+            <div class="small text-muted">{{ s.autorizado_por }}</div>
+            {% endif %}
+          </td>
+          <td class="text-end" style="min-width:190px">
+            {% if s.estatus == 'pendiente' and current_user.rank >= GERENTE_RANK %}
+            <form method="post" action="{{ url_for('reingreso_autorizar', sol_id=s.id) }}" class="d-inline"
+                  onsubmit="return confirm('Autorizar el reingreso de {{ s.nombre }}? Se generara un contrato nuevo.');">
+              <button class="btn btn-sm btn-success">Autorizar</button>
+            </form>
+            <form method="post" action="{{ url_for('reingreso_rechazar', sol_id=s.id) }}" class="d-inline"
+                  onsubmit="return confirm('Rechazar esta solicitud de reingreso?');">
+              <button class="btn btn-sm btn-outline-danger">Rechazar</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8" class="text-center text-muted py-3">No hay solicitudes de reingreso.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

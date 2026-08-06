@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block content %}
+<h3 class="mb-1">Solicitar reingreso</h3>
+<p class="text-muted small mb-3">
+  <b>{{ emp.nombre }} {{ emp.primer_apellido }} {{ emp.segundo_apellido or '' }}</b>
+  (cedula {{ emp.cedula }}) &middot; dado de baja el {{ emp.fecha_baja }}
+  {% if emp.motivo_baja %}&middot; motivo: {{ emp.motivo_baja }}{% endif %}
+</p>
+<div class="alert alert-info small">
+  La cedula ({{ emp.cedula }}) se conserva. Al autorizarse esta solicitud, se generara un
+  contrato nuevo y arrancan otra vez los 15 dias para completar documentacion.
+</div>
+
+<div class="card p-4" style="max-width:720px">
+  <form method="post" class="row g-3">
+    <div class="col-md-6"><label class="form-label">Obra *</label>
+      <select id="obra_sel" class="form-select">
+        <option value="">Selecciona la obra...</option>
+        {% for o in obras %}<option value="{{ o.id }}">{{ o.nombre }} - {{ o.estado }}</option>{% endfor %}
+      </select></div>
+    <div class="col-md-6"><label class="form-label">Puesto (categoria de esa obra) *</label>
+      <select name="puesto_id" id="puesto_sel" class="form-select" required>
+        <option value="">Primero elige la obra...</option>
+        {% for p in puestos %}
+        <option value="{{ p.id }}" data-obra="{{ p.obra_id }}"
+                {{ 'selected' if datos.get('puesto_id')==(p.id|string) }}>
+          {{ p.puesto }} (Sueldo {{ p.sueldo_semanal|money }}/sem, Viaticos {{ p.viaticos_semanales|money }}/sem)
+        </option>
+        {% endfor %}
+      </select></div>
+
+    <div class="col-md-6"><label class="form-label">Nueva fecha de alta *</label>
+      <input name="fecha_alta_nueva" type="date" class="form-control"
+             value="{{ datos.get('fecha_alta_nueva','') }}" required></div>
+
+    <div class="col-12"><hr class="my-1"></div>
+    <div class="col-md-4"><label class="form-label">Banco (opcional)</label>
+      <select name="banco" class="form-select">
+        <option value="">-</option>
+        {% for b in bancos %}<option {{ 'selected' if datos.get('banco')==b }}>{{ b }}</option>{% endfor %}
+      </select></div>
+    <div class="col-md-4"><label class="form-label">Tipo de cuenta</label>
+      <select name="tipo_cuenta" class="form-select">
+        <option value="">-</option>
+        {% for t in tipos %}<option {{ 'selected' if datos.get('tipo_cuenta')==t }}>{{ t }}</option>{% endfor %}
+      </select></div>
+    <div class="col-md-4"><label class="form-label">No. de cuenta</label>
+      <input name="numero_cuenta" class="form-control" value="{{ datos.get('numero_cuenta','') }}"></div>
+
+    <div class="col-12"><label class="form-label">Motivo del reingreso</label>
+      <textarea name="motivo" class="form-control" rows="2">{{ datos.get('motivo','') }}</textarea></div>
+
+    <div class="col-12 d-flex gap-2">
+      <button class="btn btn-primary">Enviar solicitud</button>
+      <a class="btn btn-outline-secondary" href="{{ url_for('bajas') }}">Cancelar</a>
+    </div>
+  </form>
+</div>
+
+<script>
+(function(){
+  var obraSel = document.getElementById("obra_sel");
+  var puestoSel = document.getElementById("puesto_sel");
+  if(!obraSel || !puestoSel) return;
+  function filtrarPuestos(){
+    var obra = obraSel.value;
+    Array.prototype.forEach.call(puestoSel.options, function(op){
+      if(!op.value) return;
+      var match = (op.getAttribute("data-obra") === obra);
+      op.hidden = !match; op.disabled = !match;
+    });
+    var cur = puestoSel.options[puestoSel.selectedIndex];
+    if(!obra || (cur && cur.value && cur.getAttribute("data-obra") !== obra)) puestoSel.value = "";
+  }
+  filtrarPuestos();
+  obraSel.addEventListener("change", filtrarPuestos);
+})();
+</script>
+{% endblock %}

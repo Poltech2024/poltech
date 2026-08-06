@@ -3,7 +3,10 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h3 class="mb-0">Bajas de personal</h3>
-  <a class="btn btn-outline-primary" href="{{ url_for('bajas_excel', obra_id=f_obra, desde=f_desde, hasta=f_hasta) }}">Descargar Excel</a>
+  <div class="d-flex gap-2">
+    <a class="btn btn-outline-secondary" href="{{ url_for('reingresos') }}">Solicitudes de reingreso</a>
+    <a class="btn btn-outline-primary" href="{{ url_for('bajas_excel', obra_id=f_obra, desde=f_desde, hasta=f_hasta) }}">Descargar Excel</a>
+  </div>
 </div>
 
 <div class="card mb-3">
@@ -46,11 +49,10 @@
           <td class="small">{{ b.motivo_baja or '-' }}</td>
           <td class="text-end" style="min-width:210px">
             <a class="btn btn-sm btn-outline-primary" href="{{ url_for('escrito_baja', emp_id=b.id) }}">Aviso de baja</a>
-            {% if current_user.rank >= GERENTE_RANK %}
-            <form method="post" action="{{ url_for('personal_reactivar', emp_id=b.id) }}" class="d-inline"
-                  onsubmit="return confirm('Reactivar a este trabajador?');">
-              <button class="btn btn-sm btn-outline-success">Reactivar</button>
-            </form>
+            {% if b.id in con_solicitud %}
+            <span class="badge text-bg-warning text-dark">Reingreso pendiente</span>
+            {% else %}
+            <a class="btn btn-sm btn-outline-success" href="{{ url_for('reingreso_solicitar', emp_id=b.id) }}">Solicitar reingreso</a>
             {% endif %}
           </td>
         </tr>
