@@ -168,6 +168,11 @@ def titulo_obra(s):
         else:
             out.append(w[:1].upper() + w[1:].lower())
     return " ".join(out)
+# NSS generico para personal pensionado que no requiere alta en el IMSS.
+# Se exime de la validacion normal (digito verificador) y de la regla de
+# NSS unico, para que varios pensionados puedan compartirlo.
+NSS_GENERICO = "00000000000"
+
 # Catalogo de bancos disponibles en Mexico (los mas usados para nomina).
 BANCOS = [
     "BBVA Mexico", "Banorte", "Santander", "Citibanamex", "HSBC",
@@ -372,7 +377,8 @@ def init_db():
                       ("estatus_docs", "TEXT DEFAULT 'Pendiente de carga'"),
                       ("fecha_registro", "TEXT"), ("fecha_solicitud", "TEXT"),
                       ("fecha_baja", "TEXT"), ("motivo_baja", "TEXT"),
-                      ("viaticos_semanales", "REAL"), ("bono_semanal", "REAL DEFAULT 0")):
+                      ("viaticos_semanales", "REAL"), ("bono_semanal", "REAL DEFAULT 0"),
+                      ("nss_generico", "INTEGER DEFAULT 0"), ("autoriza_nss_generico", "TEXT")):
         try:
             db.execute(f"ALTER TABLE empleados ADD COLUMN {col} {tipo}")
         except sqlite3.OperationalError:
@@ -1454,19 +1460,30 @@ def personal_editar(emp_id):
         nombre = titulo(f.get("nombre", "").strip())
         ap1 = titulo(f.get("primer_apellido", "").strip())
         curp = f.get("curp", "").strip().upper()
-        nss = solo_digitos(f.get("nss", ""))
+        pensionado = 1 if f.get("nss_generico") else 0
+        autoriza_pension = f.get("autoriza_nss_generico", "").strip()
         errores = []
         if not nombre: errores.append("El nombre es obligatorio.")
         if not ap1: errores.append("El primer apellido es obligatorio.")
         if not f.get("puesto_id"): errores.append("Selecciona un puesto.")
         if not curp_valida(curp):
             errores.append("La CURP no tiene un formato valido.")
-        if nss and not nss_valido(nss):
-            errores.append("El NSS no es valido.")
+        if pensionado and role_rank(session.get("role", "")) < GERENTE_RANK:
+            errores.append("Solo el superintendente o el administrador pueden marcar NSS generico de pensionados.")
+
+        if pensionado:
+            if not autoriza_pension:
+                errores.append("Para el NSS generico de pensionados, indica que administrador autorizo.")
+            nss = NSS_GENERICO
+        else:
+            nss = solo_digitos(f.get("nss", ""))
+            if nss and not nss_valido(nss):
+                errores.append("El NSS no es valido.")
+
         err_sol = validar_solicitud_imss(f.get("fecha_solicitud", ""), f.get("fecha_alta", ""))
         if err_sol: errores.append(err_sol)
-        # NSS unico excluyendo al propio empleado
-        if nss:
+        # NSS unico excluyendo al propio empleado (el NSS generico si se puede compartir)
+        if nss and nss != NSS_GENERICO:
             otro = db.execute(
                 "SELECT cedula FROM empleados WHERE nss=? AND id<>?",
                 (nss, emp_id)).fetchone()
@@ -1487,6 +1504,7 @@ def personal_editar(emp_id):
                curp=?, rfc=?, cp_fiscal=?, nss=?, sexo=?, fecha_nacimiento=?,
                puesto_id=?, fecha_alta=?, fecha_solicitud=?, importe_alta_imss=?,
                infonavit_monto=?, viaticos_semanales=?, bono_semanal=?,
+               nss_generico=?, autoriza_nss_generico=?,
                estatus_docs=?, observaciones=? WHERE id=?""",
             (nombre, ap1, titulo(f.get("segundo_apellido", "").strip()), curp,
              f.get("rfc", "").strip().upper(), f.get("cp_fiscal", "").strip(),
@@ -1495,8 +1513,12 @@ def personal_editar(emp_id):
              float(f.get("importe_alta_imss") or 0), float(f.get("infonavit_monto") or 0),
              (float(f.get("viaticos_semanales")) if (f.get("viaticos_semanales") or "").strip() != "" else None),
              float(f.get("bono_semanal") or 0),
+             pensionado, autoriza_pension,
              f.get("estatus_docs", "Pendiente de carga"),
              f.get("observaciones", "").strip(), emp_id))
+        if pensionado and not emp["nss_generico"]:
+            registrar_bitacora(db, "NSS generico de pensionado",
+                                f"Empleado {emp['cedula']} ({nombre} {ap1}), autorizo: {autoriza_pension}")
         db.commit()
         flash(f"Empleado actualizado (cedula {emp['cedula']}).", "success")
         return redirect(url_for("personal"))
@@ -1624,6 +1646,8 @@ def personal_nuevo():
         fecha_nac = f.get("fecha_nacimiento", "")
         exime = 1 if f.get("exime_docs") else 0
         autoriza = f.get("autoriza_tercero", "").strip()
+        pensionado = 1 if f.get("nss_generico") else 0
+        autoriza_pension = f.get("autoriza_nss_generico", "").strip()
 
         errores = []
         if not nombre: errores.append("El nombre es obligatorio.")
@@ -1636,24 +1660,32 @@ def personal_nuevo():
         if err_sol: errores.append(err_sol)
         if exime and role_rank(session.get("role", "")) < GERENTE_RANK:
             errores.append("Solo el superintendente o el administrador pueden eximir documentos.")
+        if pensionado and role_rank(session.get("role", "")) < GERENTE_RANK:
+            errores.append("Solo el superintendente o el administrador pueden marcar NSS generico de pensionados.")
 
         # CURP: formato obligatorio
         if not curp_valida(curp):
             errores.append("La CURP no tiene un formato valido (18 caracteres).")
 
-        # NSS: obligatorio salvo que se exima con autorizacion de un tercero
-        if exime:
+        # NSS: obligatorio, salvo que se exima con autorizacion de un tercero, o que sea
+        # personal pensionado con NSS generico (autorizado por un administrador).
+        if pensionado:
+            if not autoriza_pension:
+                errores.append("Para el NSS generico de pensionados, indica que administrador autorizo.")
+            nss_norm = NSS_GENERICO
+        elif exime:
             if not autoriza:
                 errores.append("Para eximir documentos, indica quien autoriza (tercero).")
+            nss_norm = ""
         else:
             if not nss:
                 errores.append("El NSS es obligatorio (o marca 'eximir' con autorizacion).")
             elif not nss_valido(nss):
                 errores.append("El NSS no es valido (deben ser 11 digitos con digito verificador correcto).")
+            nss_norm = solo_digitos(nss)
 
-        # NSS unico: no puede repetirse (si se captura)
-        nss_norm = solo_digitos(nss)
-        if nss_norm:
+        # NSS unico: no puede repetirse (salvo el NSS generico de pensionados, que si se comparte)
+        if nss_norm and nss_norm != NSS_GENERICO:
             ya = db.execute(
                 "SELECT cedula, nombre, primer_apellido FROM empleados WHERE nss=?",
                 (nss_norm,)).fetchone()
@@ -1710,17 +1742,19 @@ def personal_nuevo():
                (cedula, nombre, primer_apellido, segundo_apellido, curp, rfc, cp_fiscal,
                 nss, sexo, fecha_nacimiento, puesto_id, fecha_alta, fecha_solicitud,
                 fecha_registro, importe_alta_imss, infonavit_monto, viaticos_semanales,
-                bono_semanal, exime_docs, autoriza_tercero, observaciones, estatus_docs)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                bono_semanal, exime_docs, autoriza_tercero, nss_generico,
+                autoriza_nss_generico, observaciones, estatus_docs)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (cedula, nombre, ap1, ap2, curp,
              f.get("rfc", "").strip().upper(), f.get("cp_fiscal", "").strip(),
-             solo_digitos(nss), sexo, fecha_nac, f.get("puesto_id"),
+             nss_norm, sexo, fecha_nac, f.get("puesto_id"),
              f.get("fecha_alta"), f.get("fecha_solicitud", ""),
              date.today().isoformat(), float(f.get("importe_alta_imss") or 0),
              float(f.get("infonavit_monto") or 0),
              (float(f.get("viaticos_semanales")) if (f.get("viaticos_semanales") or "").strip() != "" else None),
              float(f.get("bono_semanal") or 0),
-             exime, autoriza, observaciones, "Pendiente de carga"),
+             exime, autoriza, pensionado, autoriza_pension,
+             observaciones, "Pendiente de carga"),
         )
         emp_id = cur.lastrowid
         if cta_num:
@@ -1728,6 +1762,9 @@ def personal_nuevo():
                 "INSERT INTO cuentas_bancarias(empleado_id, institucion, tipo_cuenta, numero) VALUES(?,?,?,?)",
                 (emp_id, cta_inst, cta_tipo, cta_num),
             )
+        if pensionado:
+            registrar_bitacora(db, "NSS generico de pensionado",
+                                f"Empleado {cedula} ({nombre} {ap1}), autorizo: {autoriza_pension}")
         db.commit()
 
         # Generar el contrato automaticamente y avisar por correo a quien dio el alta
