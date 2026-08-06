@@ -115,10 +115,10 @@ def siguiente_cedula(db):
 
 def resolver_puesto(db, obra_nom, puesto_nom):
     """Devuelve el id del puesto y el estado de su obra, coincidiendo con obra + categoria
-    del catalogo, o None si esa combinacion no existe (no se inventan obras)."""
+    del catalogo (solo puestos activos), o None si esa combinacion no existe."""
     return db.execute(
         "SELECT p.id, o.estado FROM puestos p JOIN obras o ON o.id=p.obra_id "
-        "WHERE lower(o.nombre)=lower(?) AND lower(p.nombre)=lower(?)",
+        "WHERE lower(o.nombre)=lower(?) AND lower(p.nombre)=lower(?) AND p.activo=1",
         ((obra_nom or "").strip(), (puesto_nom or "").strip())).fetchone()
 
 
@@ -380,6 +380,11 @@ def init_db():
     # Migracion suave: clasificacion en el catalogo de puestos y en el detalle de nomina
     try:
         db.execute("ALTER TABLE puestos ADD COLUMN clasificacion TEXT")
+    except sqlite3.OperationalError:
+        pass
+    # Migracion suave: puesto activo/inactivo (se puede ocultar del catalogo sin borrarlo)
+    try:
+        db.execute("ALTER TABLE puestos ADD COLUMN activo INTEGER NOT NULL DEFAULT 1")
     except sqlite3.OperationalError:
         pass
     try:
@@ -1343,6 +1348,37 @@ def puesto_editar(puesto_id):
                        db.execute("SELECT nombre FROM clasificaciones ORDER BY nombre").fetchall()]
     return render_template("puesto_form.html", p=p, clasificaciones=clasificaciones)
 
+
+@app.route("/puesto/<int:puesto_id>/desactivar", methods=["POST"])
+@min_rank(GERENTE_RANK)
+def puesto_desactivar(puesto_id):
+    db = get_db()
+    p = db.execute("SELECT * FROM puestos WHERE id=?", (puesto_id,)).fetchone()
+    if not p:
+        abort(404)
+    if not puede_ver_obra(db, p["obra_id"]):
+        abort(403)
+    db.execute("UPDATE puestos SET activo=0 WHERE id=?", (puesto_id,))
+    db.commit()
+    flash(f"Puesto '{p['nombre']}' desactivado. Ya no aparecera para dar de alta gente nueva, "
+          "pero los trabajadores que ya lo tienen siguen funcionando normal.", "success")
+    return redirect(url_for("catalogo"))
+
+
+@app.route("/puesto/<int:puesto_id>/reactivar", methods=["POST"])
+@min_rank(GERENTE_RANK)
+def puesto_reactivar(puesto_id):
+    db = get_db()
+    p = db.execute("SELECT * FROM puestos WHERE id=?", (puesto_id,)).fetchone()
+    if not p:
+        abort(404)
+    if not puede_ver_obra(db, p["obra_id"]):
+        abort(403)
+    db.execute("UPDATE puestos SET activo=1 WHERE id=?", (puesto_id,))
+    db.commit()
+    flash(f"Puesto '{p['nombre']}' reactivado.", "success")
+    return redirect(url_for("catalogo"))
+
 # ---------------------------------------------------------------------------
 # Personal
 # ---------------------------------------------------------------------------
@@ -1409,7 +1445,7 @@ def personal_editar(emp_id):
     puestos = db.execute(
         "SELECT p.id, p.nombre AS puesto, p.sueldo_semanal, p.viaticos_semanales, "
         "p.obra_id, o.nombre AS obra, o.estado FROM puestos p JOIN obras o ON o.id=p.obra_id "
-        "ORDER BY o.nombre, p.nombre").fetchall()
+        "WHERE p.activo=1 OR p.id=? ORDER BY o.nombre, p.nombre", (emp["puesto_id"],)).fetchall()
     obras_form = db.execute("SELECT * FROM obras ORDER BY nombre").fetchall()
     propuesta_por_obra = {o["id"]: propuesta_salario_alta(db, o["estado"]) for o in obras_form}
 
@@ -1563,13 +1599,13 @@ def personal_nuevo():
         puestos = db.execute(
             "SELECT p.id, p.nombre AS puesto, p.sueldo_semanal, p.viaticos_semanales, "
             "p.obra_id, o.nombre AS obra, o.estado FROM puestos p JOIN obras o ON o.id=p.obra_id "
-            "ORDER BY o.nombre, p.nombre").fetchall()
+            "WHERE p.activo=1 ORDER BY o.nombre, p.nombre").fetchall()
     elif vis:
         ph = ",".join("?" * len(vis))
         puestos = db.execute(
             "SELECT p.id, p.nombre AS puesto, p.sueldo_semanal, p.viaticos_semanales, "
             "p.obra_id, o.nombre AS obra, o.estado FROM puestos p JOIN obras o ON o.id=p.obra_id "
-            f"WHERE p.obra_id IN ({ph}) ORDER BY o.nombre, p.nombre", vis).fetchall()
+            f"WHERE p.activo=1 AND p.obra_id IN ({ph}) ORDER BY o.nombre, p.nombre", vis).fetchall()
     else:
         puestos = []
     obras_form = obras_visibles(db)
@@ -1775,7 +1811,8 @@ def personal_plantilla():
     col = 7
     for o in obras_l:
         filas_puesto = db.execute(
-            "SELECT nombre FROM puestos WHERE obra_id=? ORDER BY nombre", (o["id"],)).fetchall()
+            "SELECT nombre FROM puestos WHERE obra_id=? AND activo=1 ORDER BY nombre",
+            (o["id"],)).fetchall()
         nombres_puesto = [r["nombre"] for r in filas_puesto]
         if not nombres_puesto:
             continue

@@ -81,17 +81,33 @@
 </div>
 <div class="card">
   <table class="table table-sm mb-0 align-middle">
-    <thead><tr><th>Obra</th><th>Puesto</th><th>Clasificacion</th><th class="text-end">Sueldo semanal</th><th class="text-end">Viaticos semanales</th>{% if current_user.rank >= GERENTE_RANK %}<th></th>{% endif %}</tr></thead>
+    <thead><tr><th>Obra</th><th>Puesto</th><th>Clasificacion</th><th class="text-end">Sueldo semanal</th><th class="text-end">Viaticos semanales</th><th>Estado</th>{% if current_user.rank >= GERENTE_RANK %}<th></th>{% endif %}</tr></thead>
     <tbody>
       {% for p in puestos %}
-      <tr><td>{{ p.obra }}</td><td>{{ p.puesto }}</td>
+      <tr class="{% if not p.activo %}text-muted{% endif %}">
+        <td>{{ p.obra }}</td><td>{{ p.puesto }}</td>
         <td>{% if p.clasificacion %}<span class="badge text-bg-light border">{{ p.clasificacion }}</span>{% else %}<span class="text-danger small">sin clasificar</span>{% endif %}</td>
         <td class="text-end">{{ p.sueldo_semanal|money }}</td>
         <td class="text-end">{{ p.viaticos_semanales|money }}</td>
-        {% if current_user.rank >= GERENTE_RANK %}<td class="text-end"><a class="btn btn-sm btn-outline-primary" href="{{ url_for('puesto_editar', puesto_id=p.id) }}">Editar</a></td>{% endif %}
+        <td>{% if p.activo %}<span class="badge text-bg-success">Activo</span>{% else %}<span class="badge text-bg-secondary">Inactivo</span>{% endif %}</td>
+        {% if current_user.rank >= GERENTE_RANK %}
+        <td class="text-end d-flex gap-1 justify-content-end">
+          <a class="btn btn-sm btn-outline-primary" href="{{ url_for('puesto_editar', puesto_id=p.id) }}">Editar</a>
+          {% if p.activo %}
+          <form method="post" action="{{ url_for('puesto_desactivar', puesto_id=p.id) }}"
+                onsubmit="return confirm('Desactivar el puesto \'{{ p.puesto }}\'? Ya no se podra elegir para dar de alta gente nueva.');">
+            <button class="btn btn-sm btn-outline-secondary">Desactivar</button>
+          </form>
+          {% else %}
+          <form method="post" action="{{ url_for('puesto_reactivar', puesto_id=p.id) }}">
+            <button class="btn btn-sm btn-outline-success">Reactivar</button>
+          </form>
+          {% endif %}
+        </td>
+        {% endif %}
       </tr>
       {% else %}
-      <tr><td colspan="6" class="text-center text-muted py-3">Aun no hay puestos.</td></tr>
+      <tr><td colspan="7" class="text-center text-muted py-3">Aun no hay puestos.</td></tr>
       {% endfor %}
     </tbody>
   </table>
