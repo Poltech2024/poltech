@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block title %}Historial de nomina - Nomina Poltech{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 no-print">
+  <h3 class="mb-0">Reportes &middot; Historial de nomina</h3>
+  <div class="d-flex gap-2">
+    <a class="btn btn-outline-success"
+       href="{{ url_for('reporte_historial_nomina_excel', obra=filtros.obra, clasificacion=filtros.clasificacion, desde=filtros.desde, hasta=filtros.hasta) }}">
+      Descargar Excel</a>
+    <button class="btn btn-outline-primary" onclick="window.print()">Imprimir</button>
+  </div>
+</div>
+
+<div class="card mb-3 no-print">
+  <form method="get" class="card-body row g-2 align-items-end">
+    <div class="col-md-3">
+      <label class="form-label small mb-1">Obra</label>
+      <select name="obra" class="form-select">
+        <option value="">Todas</option>
+        {% for o in obras %}<option {{ 'selected' if filtros.obra==o.nombre }}>{{ o.nombre }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label small mb-1">Categoria</label>
+      <select name="clasificacion" class="form-select">
+        <option value="">Todas</option>
+        {% for c in clasificaciones %}<option {{ 'selected' if filtros.clasificacion==c }}>{{ c }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="col-md-2"><label class="form-label small mb-1">Semana desde</label>
+      <input type="date" name="desde" class="form-control" value="{{ filtros.desde }}"></div>
+    <div class="col-md-2"><label class="form-label small mb-1">Semana hasta</label>
+      <input type="date" name="hasta" class="form-control" value="{{ filtros.hasta }}"></div>
+    <div class="col-md-2 d-flex gap-2">
+      <button class="btn btn-primary">Filtrar</button>
+      <a class="btn btn-outline-secondary" href="{{ url_for('reporte_historial_nomina') }}">Limpiar</a>
+    </div>
+  </form>
+</div>
+<p class="text-muted small">
+  El filtro de semana usa la fecha de inicio (viernes) de cada nomina calculada.
+  {{ filas|length }} registros (trabajador + semana) encontrados.
+</p>
+
+<div class="card">
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead>
+        <tr>
+          <th>Semana</th><th>Obra</th><th>Cedula</th><th>Trabajador</th><th>Categoria</th>
+          <th class="text-end">Dias</th><th class="text-end">Sueldo</th><th class="text-end">Viaticos</th>
+          <th class="text-end">Bono</th><th class="text-end">H. extra</th><th class="text-end">Descuentos</th>
+          <th class="text-end">Neto</th><th>Estatus</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for f in filas %}
+        <tr>
+          <td class="small">{{ f.semana_num }}/{{ f.anio }}<br><span class="text-muted">{{ f.fecha_inicio }} al {{ f.fecha_fin }}</span></td>
+          <td class="small">{{ f.obra }}</td>
+          <td><b>{{ f.cedula or '-' }}</b></td>
+          <td class="small">{{ f.nombre }}</td>
+          <td class="small">{{ f.clasificacion or 'Sin clasificar' }}</td>
+          <td class="text-end">{{ f.dias }}</td>
+          <td class="text-end">{{ f.sueldo|money }}</td>
+          <td class="text-end">{{ f.viaticos|money }}</td>
+          <td class="text-end">{{ (f.bono or 0)|money }}</td>
+          <td class="text-end">{{ f.he_importe|money }}</td>
+          <td class="text-end">{{ (f.infonavit + f.desc_nomina + f.desc_otra + f.desc_retardos)|money }}</td>
+          <td class="text-end"><b>{{ f.neto|money }}</b></td>
+          <td>
+            {% if f.nomina_estatus == 'autorizada' %}
+            <span class="badge text-bg-success">Autorizada</span>
+            {% else %}
+            <span class="badge text-bg-secondary">Pendiente</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="13" class="text-center text-muted py-4">No hay nomina para esos filtros.</td></tr>
+        {% endfor %}
+      </tbody>
+      {% if filas %}
+      <tfoot>
+        <tr class="table-light fw-bold">
+          <td colspan="6" class="text-end">Totales:</td>
+          <td class="text-end">{{ tot.sueldo|money }}</td>
+          <td class="text-end">{{ tot.viaticos|money }}</td>
+          <td class="text-end">{{ tot.bono|money }}</td>
+          <td class="text-end">{{ tot.he_importe|money }}</td>
+          <td class="text-end">{{ (tot.infonavit + tot.desc_nomina + tot.desc_otra + tot.desc_retardos)|money }}</td>
+          <td class="text-end">{{ tot.neto|money }}</td>
+          <td></td>
+        </tr>
+      </tfoot>
+      {% endif %}
+    </table>
+  </div>
+</div>
+
+<style>
+@media print {
+  .no-print, .sidebar, .navbar, .brand-bar { display: none !important; }
+  .col-lg-10 { width: 100% !important; flex: 0 0 100% !important; max-width: 100% !important; }
+}
+</style>
+{% endblock %}

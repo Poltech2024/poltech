@@ -81,6 +81,7 @@
       <div class="group-label" data-target="grupo-reportes">Reportes <span class="chevron">&rsaquo;</span></div>
       <div class="group-links" id="grupo-reportes">
         {% if current_user.rank >= GERENTE_RANK %}<a href="{{ url_for('reporte_calidad_datos') }}">Calidad de datos</a>{% endif %}
+        {% if current_user.rank >= GERENTE_RANK %}<a href="{{ url_for('reporte_historial_nomina') }}">Historial de nomina</a>{% endif %}
       </div>
 
       <div class="group-label" data-target="grupo-config">Configuracion <span class="chevron">&rsaquo;</span></div>

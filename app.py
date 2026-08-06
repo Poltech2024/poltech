@@ -29,7 +29,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.environ.get("DB_PATH", os.path.join(APP_DIR, "poltech.db"))
 
-APP_VERSION = "1.26"   # version del sistema (visible en el menu)
+APP_VERSION = "1.27"   # version del sistema (visible en el menu)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-cambia-esta-clave-en-render")
@@ -3514,6 +3514,97 @@ def reporte_calidad_datos_excel():
     buf = io.BytesIO(); wb.save(buf); buf.seek(0)
     return send_file(buf, as_attachment=True,
                      download_name="Reporte_calidad_datos.xlsx",
+                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
+def historial_nomina_filas(db, f_obra, f_clasif, desde, hasta):
+    """Detalle de nomina pagado (todas las semanas), visible para el usuario en
+    sesion. Devuelve una lista de dicts, uno por trabajador y semana."""
+    sql = ("SELECT d.*, n.fecha_inicio, n.fecha_fin, n.semana_num, n.anio, "
+           "n.estatus AS nomina_estatus, o.nombre AS obra "
+           "FROM nomina_detalle d "
+           "JOIN nominas n ON n.id=d.nomina_id "
+           "JOIN obras o ON o.id=n.obra_id "
+           "WHERE 1=1")
+    args = []
+    if f_obra:
+        sql += " AND o.nombre = ?"; args.append(f_obra)
+    if f_clasif:
+        sql += " AND d.clasificacion = ?"; args.append(f_clasif)
+    if desde:
+        sql += " AND n.fecha_inicio >= ?"; args.append(desde)
+    if hasta:
+        sql += " AND n.fecha_inicio <= ?"; args.append(hasta)
+    vis = obras_del_usuario(db)
+    if vis is not None:
+        if vis:
+            ph = ",".join("?" * len(vis))
+            sql += f" AND o.id IN ({ph})"; args += vis
+        else:
+            sql += " AND 1=0"
+    sql += " ORDER BY n.fecha_inicio DESC, o.nombre, d.nombre"
+    return [dict(r) for r in db.execute(sql, args).fetchall()]
+
+
+@app.route("/reportes/historial-nomina")
+@min_rank(GERENTE_RANK)
+def reporte_historial_nomina():
+    db = get_db()
+    f_obra = request.args.get("obra", "").strip()
+    f_clasif = request.args.get("clasificacion", "").strip()
+    desde = request.args.get("desde", "").strip()
+    hasta = request.args.get("hasta", "").strip()
+    filas = historial_nomina_filas(db, f_obra, f_clasif, desde, hasta)
+    tot = {k: round(sum(_num(f.get(k)) for f in filas), 2) for k in
+           ("sueldo", "viaticos", "bono", "he_importe", "infonavit",
+            "desc_nomina", "desc_otra", "desc_retardos", "neto")}
+    obras = db.execute("SELECT DISTINCT nombre FROM obras ORDER BY nombre").fetchall()
+    clasificaciones = [r["nombre"] for r in
+                        db.execute("SELECT nombre FROM clasificaciones ORDER BY nombre").fetchall()]
+    return render_template("reporte_historial_nomina.html", filas=filas, tot=tot,
+                           obras=obras, clasificaciones=clasificaciones,
+                           filtros={"obra": f_obra, "clasificacion": f_clasif,
+                                    "desde": desde, "hasta": hasta})
+
+
+@app.route("/reportes/historial-nomina/excel")
+@min_rank(GERENTE_RANK)
+def reporte_historial_nomina_excel():
+    db = get_db()
+    f_obra = request.args.get("obra", "").strip()
+    f_clasif = request.args.get("clasificacion", "").strip()
+    desde = request.args.get("desde", "").strip()
+    hasta = request.args.get("hasta", "").strip()
+    filas = historial_nomina_filas(db, f_obra, f_clasif, desde, hasta)
+
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment
+    wb = Workbook(); ws = wb.active; ws.title = "Historial nomina"
+    cab = ["SEMANA", "DEL", "AL", "OBRA", "CEDULA", "TRABAJADOR", "CATEGORIA",
+           "DIAS", "SUELDO", "VIATICOS", "BONO", "HORAS EXTRA", "INFONAVIT",
+           "DESC. NOMINA", "DESC. OTRA", "DESC. RETARDOS", "NETO", "ESTATUS"]
+    ws.append(cab)
+    for c in ws[1]:
+        c.font = Font(name="Arial", bold=True, color="FFFFFF")
+        c.fill = PatternFill("solid", fgColor="16233C")
+        c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    for f in filas:
+        ws.append([
+            f"{f['semana_num']}/{f['anio']}", f["fecha_inicio"], f["fecha_fin"],
+            f["obra"], f["cedula"] or "", f["nombre"], f["clasificacion"] or "Sin clasificar",
+            _num(f["dias"]), _num(f["sueldo"]), _num(f["viaticos"]), _num(f.get("bono")),
+            _num(f["he_importe"]), _num(f["infonavit"]), _num(f["desc_nomina"]),
+            _num(f["desc_otra"]), _num(f["desc_retardos"]), _num(f["neto"]),
+            "Autorizada" if f["nomina_estatus"] == "autorizada" else "Pendiente",
+        ])
+    anchos = {"A": 10, "B": 12, "C": 12, "D": 22, "E": 10, "F": 28, "G": 18,
+              "H": 8, "I": 12, "J": 12, "K": 10, "L": 12, "M": 12, "N": 12,
+              "O": 12, "P": 14, "Q": 12, "R": 12}
+    for col, w in anchos.items():
+        ws.column_dimensions[col].width = w
+    buf = io.BytesIO(); wb.save(buf); buf.seek(0)
+    return send_file(buf, as_attachment=True,
+                     download_name="Reporte_historial_nomina.xlsx",
                      mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 
