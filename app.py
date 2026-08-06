@@ -113,13 +113,18 @@ def siguiente_cedula(db):
     return f"{letra}{num:03d}"
 
 
-def resolver_puesto(db, obra_nom, puesto_nom):
-    """Devuelve el id del puesto y el estado de su obra, coincidiendo con obra + categoria
-    del catalogo (solo puestos activos), o None si esa combinacion no existe."""
+def resolver_puesto(db, obra_nom):
+    """En la carga masiva, el texto de la columna Puesto ya no se usa para elegir
+    el puesto (queda solo de referencia): siempre se asigna el puesto activo de
+    menor sueldo semanal de la obra indicada, para revisar y ajustar el sueldo
+    de cada quien despues. Devuelve el puesto (id, nombre, sueldo, estado de la
+    obra) o None si la obra no existe o no tiene puestos activos."""
     return db.execute(
-        "SELECT p.id, o.estado FROM puestos p JOIN obras o ON o.id=p.obra_id "
-        "WHERE lower(o.nombre)=lower(?) AND lower(p.nombre)=lower(?) AND p.activo=1",
-        ((obra_nom or "").strip(), (puesto_nom or "").strip())).fetchone()
+        "SELECT p.id, p.nombre AS puesto, p.sueldo_semanal, o.estado FROM puestos p "
+        "JOIN obras o ON o.id=p.obra_id "
+        "WHERE lower(o.nombre)=lower(?) AND p.activo=1 "
+        "ORDER BY p.sueldo_semanal ASC LIMIT 1",
+        ((obra_nom or "").strip(),)).fetchone()
 
 
 ESTADOS = [
@@ -1789,9 +1794,9 @@ def personal_nuevo():
 # ---------------------------------------------------------------------------
 COLS_CARGA = ["NOMBRE(S)", "PRIMER APELLIDO", "SEGUNDO APELLIDO", "CURP", "RFC",
               "CP FISCAL", "NSS", "SEXO (H/M)", "FECHA NACIMIENTO (DD-MM-AAAA)",
-              "OBRA", "PUESTO", "FECHA ALTA (DD-MM-AAAA)", "SALARIO ALTA IMSS",
-              "INFONAVIT SEMANAL", "BANCO", "TIPO DE CUENTA", "NUMERO DE CUENTA",
-              "OBSERVACIONES"]
+              "OBRA", "PUESTO (referencia, no se usa)", "FECHA ALTA (DD-MM-AAAA)",
+              "SALARIO ALTA IMSS", "INFONAVIT SEMANAL", "BANCO", "TIPO DE CUENTA",
+              "NUMERO DE CUENTA", "OBSERVACIONES"]
 
 @app.route("/personal/plantilla")
 @login_required
@@ -1803,7 +1808,7 @@ def personal_plantilla():
     ws.append(COLS_CARGA)
     ws.append(["JUAN", "PEREZ", "LOPEZ", "PELJ800101HDFRPN09", "PELJ800101AB1",
                "54000", "12345678903", "H", "01-01-1980", "Torre Reforma",
-               "Soldador", "28-07-2026", "3000", "0", "BBVA Mexico",
+               "(no se usa)", "28-07-2026", "3000", "0", "BBVA Mexico",
                "CLABE interbancaria", "012180001234567890", ""])
     from openpyxl.styles import Font, PatternFill
     for c in ws[1]:
@@ -1814,10 +1819,9 @@ def personal_plantilla():
 
     # -----------------------------------------------------------------
     # Hoja oculta "Listas": aqui viven los valores de los menus desplegables
-    # (Sexo, Obra, Banco, Tipo de cuenta) y, para cada obra, la lista de sus
-    # puestos (para que el desplegable de Puesto dependa de la Obra elegida).
+    # (Sexo, Obra, Banco, Tipo de cuenta). El Puesto ya no tiene desplegable:
+    # queda de referencia y no se usa para elegir el puesto (ver personal_carga).
     # -----------------------------------------------------------------
-    from openpyxl.utils import get_column_letter
     from openpyxl.workbook.defined_name import DefinedName
     from openpyxl.worksheet.datavalidation import DataValidation
 
@@ -1828,13 +1832,11 @@ def personal_plantilla():
     def nombrar_rango(nombre, ref):
         wb.defined_names[nombre] = DefinedName(nombre, attr_text=ref)
 
-    # Columna A: nombre de la obra. Columna B: clave interna (para ubicar sus puestos).
+    # Columna A: nombre de la obra.
     for idx, o in enumerate(obras_l, start=1):
         lst.cell(row=idx, column=1, value=o["nombre"])
-        lst.cell(row=idx, column=2, value=f"OBRA_{o['id']}")
     if obras_l:
         nombrar_rango("ListaObras", f"Listas!$A$1:$A${len(obras_l)}")
-        nombrar_rango("MapaObraKey", f"Listas!$A$1:$B${len(obras_l)}")
 
     # Columna D: bancos. Columna E: tipo de cuenta.
     for idx, b in enumerate(BANCOS, start=1):
@@ -1843,21 +1845,6 @@ def personal_plantilla():
     for idx, t in enumerate(TIPOS_CUENTA, start=1):
         lst.cell(row=idx, column=5, value=t)
     nombrar_rango("ListaTipoCuenta", f"Listas!$E$1:$E${len(TIPOS_CUENTA)}")
-
-    # A partir de la columna G, una columna por obra con sus puestos.
-    col = 7
-    for o in obras_l:
-        filas_puesto = db.execute(
-            "SELECT nombre FROM puestos WHERE obra_id=? AND activo=1 ORDER BY nombre",
-            (o["id"],)).fetchall()
-        nombres_puesto = [r["nombre"] for r in filas_puesto]
-        if not nombres_puesto:
-            continue
-        for r, pnom in enumerate(nombres_puesto, start=1):
-            lst.cell(row=r, column=col, value=pnom)
-        letra = get_column_letter(col)
-        nombrar_rango(f"OBRA_{o['id']}", f"Listas!${letra}$1:${letra}${len(nombres_puesto)}")
-        col += 1
 
     # -----------------------------------------------------------------
     # Menus desplegables en la hoja "Trabajadores"
@@ -1876,13 +1863,6 @@ def personal_plantilla():
                                   error="Elige una obra de la lista (ya dada de alta en Obras).")
         ws.add_data_validation(dv_obra)
         dv_obra.add(f"J2:J{ultima_fila}")
-
-        # El Puesto depende de la Obra escrita en la misma fila (columna J).
-        dv_puesto = DataValidation(
-            type="list", formula1="INDIRECT(VLOOKUP($J2,MapaObraKey,2,0))",
-            allow_blank=True, showErrorMessage=False)
-        ws.add_data_validation(dv_puesto)
-        dv_puesto.add(f"K2:K{ultima_fila}")
 
     dv_banco = DataValidation(type="list", formula1="ListaBancos", allow_blank=True,
                               showErrorMessage=False)
@@ -1918,6 +1898,7 @@ def personal_carga():
         contratos_gen = 0
         errores = []
         duplicadas = []   # cuentas bancarias repetidas
+        creados_detalle = []   # para que revisen el sueldo de cada quien despues
 
         for i, fila in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
             if fila is None or all(c is None or str(c).strip() == "" for c in fila):
@@ -1971,9 +1952,9 @@ def personal_carga():
                 errs.append("fecha de alta vacia")
             elif not fecha_valida(falta):
                 errs.append(f"fecha de alta '{falta}' no reconocida (usa DD-MM-AAAA)")
-            puesto = resolver_puesto(db, obra_nom, puesto_nom)
+            puesto = resolver_puesto(db, obra_nom)
             if not puesto:
-                errs.append(f"la obra/puesto '{txt(obra_nom)} / {txt(puesto_nom)}' no existe en el catalogo")
+                errs.append(f"la obra '{txt(obra_nom)}' no existe en el catalogo o no tiene puestos activos")
             # NSS duplicado
             if nss and db.execute("SELECT 1 FROM empleados WHERE nss=?", (nss,)).fetchone():
                 errs.append("ya existe un trabajador con ese NSS")
@@ -2004,6 +1985,10 @@ def personal_carga():
                  0, "", txt(obs), "Pendiente de carga"))
             emp_id = cur.lastrowid
             creados += 1
+            creados_detalle.append({
+                "cedula": cedula, "nombre": nombre_completo, "obra": txt(obra_nom),
+                "puesto": puesto["puesto"], "sueldo": puesto["sueldo_semanal"],
+            })
             try:
                 crear_contrato_para(db, emp_id, avisar_a=None)
                 contratos_gen += 1
@@ -2039,7 +2024,8 @@ def personal_carga():
                 "\n".join(duplicadas))
 
         resumen = {"creados": creados, "contratos": contratos_gen,
-                   "errores": errores, "duplicadas": duplicadas}
+                   "errores": errores, "duplicadas": duplicadas,
+                   "creados_detalle": creados_detalle}
         return render_template("personal_carga.html", resumen=resumen)
 
     return render_template("personal_carga.html", resumen=None)

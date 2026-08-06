@@ -15,7 +15,9 @@
     <div class="col-md-3"><button class="btn btn-primary w-100">Subir y procesar</button></div>
   </form>
   <div class="form-text mt-2">
-    La <b>obra</b> y el <b>puesto</b> deben existir en tu catalogo; si no coinciden, esa fila se rechaza.
+    La <b>obra</b> debe existir en tu catalogo y tener al menos un puesto activo; si no, esa fila se rechaza.
+    La columna <b>Puesto</b> ya no se usa para elegir el puesto: se asigna automaticamente el de <b>menor
+    sueldo</b> de esa obra, y despues revisas/ajustas el sueldo de cada quien (esa columna solo queda de referencia).
     La <b>cedula</b> se genera automaticamente para cada trabajador nuevo.
   </div>
 </div>
@@ -26,6 +28,24 @@
   <p class="mb-2"><b>{{ resumen.creados }}</b> trabajadores creados.
     {% if resumen.contratos is defined %}<b>{{ resumen.contratos }}</b> contratos generados
     (revisalos en <a href="{{ url_for('contratos') }}">Contratos</a>).{% endif %}</p>
+
+  {% if resumen.creados_detalle %}
+  <div class="alert alert-info">
+    <b>Revisa el sueldo de estos {{ resumen.creados_detalle|length }} trabajadores</b>
+    (se les asigno el puesto de menor sueldo de su obra; ajustalo si no corresponde):
+    <table class="table table-sm table-white mb-0 mt-2">
+      <thead><tr><th>Cedula</th><th>Nombre</th><th>Obra</th><th>Puesto asignado</th><th class="text-end">Sueldo semanal</th></tr></thead>
+      <tbody>
+        {% for c in resumen.creados_detalle %}
+        <tr>
+          <td>{{ c.cedula }}</td><td>{{ c.nombre }}</td><td>{{ c.obra }}</td>
+          <td>{{ c.puesto }}</td><td class="text-end">{{ c.sueldo|money }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
 
   {% if resumen.duplicadas %}
   <div class="alert alert-warning">
