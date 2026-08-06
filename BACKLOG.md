@@ -36,9 +36,10 @@ Pruebas automaticas para evitar que un cambio futuro rompa el calculo de sueldos
 ## Dividir app.py en modulos/blueprints (pendiente)
 Separar personal / nomina / api / reportes en archivos distintos (hoy todo esta en un solo app.py).
 
-## Acentos del Contrato individual de trabajo (pendiente)
-Falta corregir los acentos de todo el texto legal (~150 lineas) en `generar_contrato_docx`.
-Se dejo fuera de los quick wins por ser un documento legal largo; requiere su propia sesion con cuidado.
+## Contrato individual de trabajo (COMPLETADA)
+Se reemplazo por completo con el formato nuevo (28 clausulas + 3 anexos), con acentos
+correctos, siguiendo el documento que aporto el usuario. Pendiente futuro: reemplazar el
+Anexo 1 generico por el detallado de cada puesto (ver "Manual de operaciones" abajo).
 
 ## Tarea 2 - Obra alterna / cobro cruzado (pendiente, va en Reportes)
 Personal del taller que a veces trabaja horas en otra obra. Esas horas se deben cobrar
@@ -70,6 +71,13 @@ para poder generar reportes y alertas de vencimiento.
 Hacer el rol/calendario de quien descansa cada sabado (rotacion del personal).
 Falta definir en una sesion futura como se organiza (por obra, por trabajador, etc.)
 y si se necesita una pantalla en el sistema o solo un documento/plantilla.
+
+## Manual de operaciones: funciones detalladas por puesto (pendiente, NUEVA)
+El Anexo 1 del contrato (funciones del puesto) hoy usa una version generica y corta por
+clasificacion (Soldadores, Montadores, etc.), redactada rapido para poder generar contratos
+de inmediato. Falta escribir las funciones detalladas y especificas de cada puesto para
+un manual de operaciones real, que tambien viva en el sistema (por ejemplo, reemplazando
+el texto generico del Anexo 1 con el detallado de cada puesto).
 
 ## Modulo de vacaciones (pendiente, NUEVA)
 Que el trabajador (o quien capture) pueda solicitar fechas de vacaciones, y llevar un

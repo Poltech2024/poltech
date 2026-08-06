@@ -29,7 +29,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.environ.get("DB_PATH", os.path.join(APP_DIR, "poltech.db"))
 
-APP_VERSION = "1.16"   # version del sistema (visible en el menu)
+APP_VERSION = "1.17"   # version del sistema (visible en el menu)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-cambia-esta-clave-en-render")
@@ -826,6 +826,14 @@ def registrar_bitacora(db, accion, detalle=""):
 MESES_ES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
             "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
 
+def fecha_larga(fecha_iso):
+    """Convierte 'AAAA-MM-DD' a '13 de mayo de 1995'. Si no se puede leer, regresa None."""
+    try:
+        d = date.fromisoformat(str(fecha_iso)[:10])
+    except ValueError:
+        return None
+    return f"{d.day} de {MESES_ES[d.month-1]} de {d.year}"
+
 def _centenas_letra(n):
     UNIDADES = ["", "UNO", "DOS", "TRES", "CUATRO", "CINCO", "SEIS", "SIETE", "OCHO", "NUEVE",
                 "DIEZ", "ONCE", "DOCE", "TRECE", "CATORCE", "QUINCE", "DIECISEIS",
@@ -886,36 +894,175 @@ def edad_de(fecha_nac):
     hoy = date.today()
     return hoy.year - f.year - ((hoy.month, hoy.day) < (f.month, f.day))
 
+CLASIFICACION_FUNCIONES = {
+    "Gerencia de obra": {
+        "objetivo": "Planear, coordinar y supervisar la ejecuci\u00f3n de la obra, asegurando el "
+                    "cumplimiento del programa, la calidad, la seguridad y el presupuesto autorizado.",
+        "funciones": [
+            "Coordinar a las cuadrillas y al personal de supervisi\u00f3n a su cargo.",
+            "Supervisar avances de obra, calidad de los trabajos y cumplimiento del programa.",
+            "Gestionar recursos, materiales y proveedores necesarios para la obra.",
+            "Verificar el cumplimiento de las normas de seguridad aplicables.",
+            "Reportar a la direcci\u00f3n de la empresa el estado y los resultados de la obra.",
+        ],
+    },
+    "Residencia de obra": {
+        "objetivo": "Coordinar la operaci\u00f3n diaria de la obra, dando seguimiento al personal, "
+                    "los avances y las condiciones de seguridad en el sitio de trabajo.",
+        "funciones": [
+            "Supervisar diariamente el avance y la calidad de los trabajos en obra.",
+            "Coordinar al personal, cuadrillas y proveedores presentes en el sitio.",
+            "Verificar el cumplimiento de las medidas de seguridad y uso de EPP.",
+            "Reportar incidencias, avances y necesidades a la gerencia de obra.",
+        ],
+    },
+    "Administracion": {
+        "objetivo": "Apoyar en las funciones administrativas, documentales y de control de la "
+                    "obra o de las oficinas de la empresa.",
+        "funciones": [
+            "Capturar, organizar y resguardar documentaci\u00f3n administrativa.",
+            "Apoyar en tr\u00e1mites, pagos y control de proveedores.",
+            "Atender al personal y proveedores en asuntos administrativos.",
+            "Elaborar reportes y mantener actualizados los archivos a su cargo.",
+        ],
+    },
+    "Montadores": {
+        "objetivo": "Ensamblar, alinear y montar estructuras met\u00e1licas, equipos o componentes "
+                    "conforme a planos, especificaciones y procedimientos de seguridad.",
+        "funciones": [
+            "Interpretar planos, croquis y \u00f3rdenes de trabajo de montaje.",
+            "Preparar, presentar y alinear piezas y estructuras conforme a tolerancias.",
+            "Apoyar y ejecutar maniobras de montaje o izaje solo con capacitaci\u00f3n, permiso y equipo "
+            "requeridos.",
+            "Verificar dimensiones, plomos y niveles del trabajo realizado.",
+            "Cuidar herramienta, equipo y materiales a su cargo.",
+        ],
+    },
+    "Soldadores": {
+        "objetivo": "Ejecutar procesos de soldadura en estructuras y componentes met\u00e1licos "
+                    "conforme a especificaciones, procedimientos de calidad y normas de seguridad.",
+        "funciones": [
+            "Interpretar planos, especificaciones y procedimientos de soldadura aplicables.",
+            "Preparar juntas y soldar \u00fanicamente conforme a procedimiento y calificaci\u00f3n vigente.",
+            "Inspeccionar el trabajo propio e identificar defectos o desviaciones.",
+            "Cuidar el equipo de soldadura, consumibles y materiales a su cargo.",
+            "Reportar de inmediato riesgos, incidentes o condiciones inseguras.",
+        ],
+    },
+    "Laminadores": {
+        "objetivo": "Preparar, cortar, conformar y procesar l\u00e1mina y perfiles met\u00e1licos conforme "
+                    "a planos, especificaciones y tolerancias.",
+        "funciones": [
+            "Trazar, medir y cortar l\u00e1mina y perfiles conforme a orden de trabajo.",
+            "Operar la maquinaria y herramienta autorizada para su puesto.",
+            "Verificar medidas, tolerancias y calidad del material procesado.",
+            "Reportar desviaciones, fallas de equipo o necesidades de mantenimiento.",
+        ],
+    },
+    "Ayudantes generales": {
+        "objetivo": "Apoyar las actividades operativas de la obra o el taller bajo la instrucci\u00f3n "
+                    "directa del personal calificado y del supervisor a cargo.",
+        "funciones": [
+            "Apoyar en la carga, traslado y acomodo de materiales y herramienta.",
+            "Mantener el orden y la limpieza del \u00e1rea de trabajo asignada.",
+            "Apoyar en maniobras y actividades bajo supervisi\u00f3n directa.",
+            "Cumplir las instrucciones de seguridad y usar el equipo de protecci\u00f3n proporcionado.",
+        ],
+    },
+    "Operadores": {
+        "objetivo": "Operar maquinaria y equipo autorizado conforme a su capacitaci\u00f3n y a los "
+                    "procedimientos de seguridad aplicables.",
+        "funciones": [
+            "Realizar la inspecci\u00f3n previa del equipo antes de operarlo.",
+            "Operar la maquinaria conforme al manual, la capacitaci\u00f3n y las instrucciones recibidas.",
+            "Reportar de inmediato fallas, necesidades de mantenimiento o condiciones inseguras.",
+            "Respetar zonas de exclusi\u00f3n, se\u00f1alizaci\u00f3n y permisos de trabajo aplicables.",
+        ],
+    },
+    "Seguridad": {
+        "objetivo": "Vigilar el cumplimiento de las medidas de seguridad, orden y control de "
+                    "acceso en la obra o instalaci\u00f3n asignada.",
+        "funciones": [
+            "Controlar el acceso de personal, visitantes y veh\u00edculos.",
+            "Verificar el uso correcto del equipo de protecci\u00f3n personal.",
+            "Reportar actos y condiciones inseguras al supervisor correspondiente.",
+            "Apoyar en la respuesta ante incidentes o emergencias conforme a los protocolos vigentes.",
+        ],
+    },
+    "Almacen": {
+        "objetivo": "Recibir, resguardar, controlar y entregar materiales, herramienta y equipo "
+                    "de la obra o el taller.",
+        "funciones": [
+            "Registrar las entradas y salidas de materiales, herramienta y equipo.",
+            "Mantener actualizado el inventario y los resguardos correspondientes.",
+            "Entregar y recibir bienes mediante vale o resguardo firmado.",
+            "Reportar de inmediato faltantes, da\u00f1os o irregularidades detectadas.",
+        ],
+    },
+    "Topografia": {
+        "objetivo": "Realizar los levantamientos, trazos y verificaciones topogr\u00e1ficas "
+                    "necesarias para la ejecuci\u00f3n de la obra.",
+        "funciones": [
+            "Operar el equipo topogr\u00e1fico conforme a su capacitaci\u00f3n.",
+            "Realizar trazos, niveles y verificaciones conforme al proyecto.",
+            "Registrar y reportar las mediciones realizadas.",
+            "Verificar el cumplimiento de las referencias y ejes del proyecto.",
+        ],
+    },
+}
+CLASIFICACION_FUNCIONES_DEFAULT = {
+    "objetivo": "Ejecutar las actividades propias de su puesto conforme a las instrucciones del "
+                "supervisor, las especificaciones aplicables y las normas de seguridad vigentes.",
+    "funciones": [
+        "Realizar las tareas asignadas por su supervisor relacionadas con su categor\u00eda.",
+        "Cuidar la herramienta, el equipo y los materiales a su cargo.",
+        "Cumplir las normas de seguridad, calidad y conducta aplicables a su puesto.",
+        "Reportar de inmediato cualquier incidente, riesgo o desviaci\u00f3n detectada.",
+    ],
+}
+
+
 def generar_contrato_docx(db, emp):
     """Arma el contrato individual de trabajo (docx) con los datos del empleado
-    y de la empresa. Devuelve (bytes, nombre_archivo). Los datos que el sistema
-    no captura quedan como linea para llenar a mano."""
+    y de la empresa, siguiendo el formato aprobado (28 cl\u00e1usulas + 3 anexos).
+    Devuelve (bytes, nombre_archivo). Los datos que el sistema no captura quedan
+    resaltados en amarillo para llenarse a mano antes de firmar."""
     from docx import Document
     from docx.shared import Pt
     from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_COLOR_INDEX
 
     P = lambda k, d="": (get_param(db, k, d) or d)
-    BL = "________________________"      # linea para completar a mano
 
     razon = P("empresa_razon_social")
     rep = P("empresa_representante")
     dom = P("empresa_domicilio")
-    rfc_emp = P("empresa_rfc") or BL
+    rfc_emp = P("empresa_rfc")
     instr = P("empresa_instrumento")
-    vol = P("empresa_volumen")
     fesc = P("empresa_fecha_escritura")
     not_num = P("empresa_notario_num")
     not_nom = P("empresa_notario_nombre")
     not_ciu = P("empresa_notario_ciudad")
 
     nombre = titulo(" ".join(x for x in [emp["nombre"], emp["primer_apellido"], emp["segundo_apellido"]] if x))
-    puesto = titulo_obra(emp["puesto"]) if emp["puesto"] else BL
+    puesto = titulo_obra(emp["puesto"]) if emp["puesto"] else ""
+    obra_nom = emp["obra"] or ""
     estado_obra = emp["estado"] or ""
-    salario = _num(emp["importe_alta_imss"])
-    sexo_txt = "MASCULINO" if (emp["sexo"] or "").upper().startswith("H") else ("FEMENINO" if (emp["sexo"] or "").upper().startswith("M") else BL)
+    sueldo_semanal = _num(emp["sueldo_semanal"])
+    salario_diario = round(sueldo_semanal / 7.0, 2) if sueldo_semanal else 0
+    salario_cotizacion = _num(emp["importe_alta_imss"])
+    sexo_txt = "MASCULINO" if (emp["sexo"] or "").upper().startswith("H") else ("FEMENINO" if (emp["sexo"] or "").upper().startswith("M") else None)
     edad = edad_de(emp["fecha_nacimiento"])
+    fecha_nac_txt = fecha_larga(emp["fecha_nacimiento"]) if emp["fecha_nacimiento"] else None
+    fecha_alta_txt = fecha_larga(emp["fecha_alta"]) if emp["fecha_alta"] else None
     hoy = date.today()
     fecha_txt = f"{hoy.day} de {MESES_ES[hoy.month-1]} de {hoy.year}"
+    es_pensionado = bool(emp["nss_generico"])
+    nss_txt = "No requiere (trabajador pensionado, no requiere nueva alta ante el IMSS)" if es_pensionado else emp["nss"]
+    tiene_cuenta = db.execute(
+        "SELECT 1 FROM cuentas_bancarias WHERE empleado_id=?", (emp["id"],)).fetchone() is not None
+    medio_pago = "TRANSFERENCIA BANCARIA" if tiene_cuenta else None
+    clasif = emp["clasificacion"] or ""
+    func = CLASIFICACION_FUNCIONES.get(clasif, CLASIFICACION_FUNCIONES_DEFAULT)
 
     doc = Document()
     base = doc.styles["Normal"]; base.font.name = "Arial"; base.font.size = Pt(10)
@@ -932,16 +1079,17 @@ def generar_contrato_docx(db, emp):
 
     LINEA = "  ____________________________  "   # espacio para escribir a mano
 
-    def par_seg(segmentos, *, center=False, space=6):
-        """Arma un parrafo con segmentos; un segmento (texto, True) va resaltado en amarillo."""
+    def par_seg(segmentos, *, center=False, space=6, bold_base=False):
+        """Arma un p\u00e1rrafo con segmentos; un segmento (texto, True) va resaltado en amarillo."""
         p = doc.add_paragraph()
         p.paragraph_format.space_after = Pt(space)
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER if center else WD_ALIGN_PARAGRAPH.JUSTIFY
         for seg in segmentos:
             if isinstance(seg, tuple):
                 r = p.add_run(seg[0]); r.font.highlight_color = WD_COLOR_INDEX.YELLOW
+                r.bold = bold_base
             else:
-                p.add_run(seg)
+                r = p.add_run(seg); r.bold = bold_base
         return p
 
     def blank():
@@ -952,97 +1100,431 @@ def generar_contrato_docx(db, emp):
         """Dato normal; si falta, queda como espacio resaltado para llenar a mano."""
         return v if (v is not None and str(v).strip()) else (LINEA, True)
 
-    par("CONTRATO INDIVIDUAL DE TRABAJO POR TIEMPO INDETERMINADO", bold=True, center=True, size=12)
-    par(f"CONTRATO INDIVIDUAL DE TRABAJO POR TIEMPO INDETERMINADO QUE CELEBRAN POR UNA PARTE "
-        f"LA EMPRESA {razon}, REPRESENTADA EN ESTE ACTO POR EL (LA) C. {rep} A QUIEN EN LO "
-        f"SUCESIVO SE LE DENOMINARA \u201cEL PATRON\u201d, Y POR LA OTRA PARTE, EL (LA) C. {nombre} "
-        f"A QUIEN EN LO SUCESIVO SE LE DENOMINARA COMO \u201cEL TRABAJADOR\u201d, Y A QUIENES EN SU "
-        f"CONJUNTO SE LES DENOMINARA \u201cLAS PARTES\u201d; QUE CONTIENE LAS CONDICIONES GENERALES "
-        f"DE TRABAJO BAJO LAS SIGUIENTES:")
-    par("D E C L A R A C I O N E S:", bold=True, center=True)
-    par_seg([("Nota: los espacios resaltados en amarillo deben llenarse (a mano o a maquina) "
-              "y ser verificados ANTES de que las partes firmen el contrato.", True)], space=10)
-    par(f"PRIMERA.- Para los efectos de los articulos 10, 11, 16, 24 y 25 de la Ley Federal del "
-        f"Trabajo, el C. {rep} declara que su representada es una sociedad mexicana, con domicilio "
-        f"ubicado en {dom}, con Registro Federal de Contribuyentes {rfc_emp}, constituida bajo el "
-        f"Instrumento Notarial numero {instr}, Volumen {vol}, de fecha {fesc}, levantado ante la fe "
-        f"del Notario Publico numero {not_num} Lic. {not_nom}, con ejercicio en {not_ciu}.")
+    def titulo_seccion(texto):
+        par(texto, bold=True, center=True, size=12, space=10)
+
+    def bullet(texto):
+        par(f"\u2610 {texto}", space=4)
+
+    # =================== CONTRATO ===================
+    titulo_seccion("CONTRATO INDIVIDUAL DE TRABAJO")
+    par("RELACI\u00d3N POR TIEMPO INDETERMINADO", bold=True, center=True, space=10)
+    par_seg([("CONTROL PREVIO A FIRMA: sustituir o confirmar todos los datos resaltados en "
+              "amarillo. No firmar, fechar ni poner huellas mientras exista un campo pendiente. "
+              "El resaltado deber\u00e1 eliminarse en la versi\u00f3n final.", True)], space=10)
     par_seg([
-        "SEGUNDA.- \u201cEL TRABAJADOR\u201d en terminos de los articulos 8, 24 y 25 de la Ley Federal "
-        "del Trabajo declara llamarse ", dato(nombre),
-        ", con numero de seguridad social ", dato(emp["nss"]),
-        ", Clave Unica de Registro de Poblacion ", dato(emp["curp"]),
-        ", Registro Federal de Contribuyentes ", dato(emp["rfc"]),
-        ", sexo ", dato(None if sexo_txt == BL else sexo_txt),
-        ", escolaridad ", blank(),
-        ", nacido en ", blank(),
-        " que cuenta con ", dato(str(edad) if edad != "" else None),
-        " anos de edad, de nacionalidad Mexicana, estado civil ", blank(),
-        " y con ultimo domicilio en ", blank(), ".",
+        "Contrato individual de trabajo que celebran, por una parte, ", dato(razon),
+        ", representada por ", dato(rep), ", en su car\u00e1cter de ", blank(),
+        ", a quien se denominar\u00e1 EL PATR\u00d3N; y, por la otra, ", dato(nombre),
+        ", a quien se denominar\u00e1 EL TRABAJADOR; conjuntamente LAS PARTES, conforme a las "
+        "siguientes declaraciones y cl\u00e1usulas.",
     ])
-    par("TERCERA.- \u201cLAS PARTES\u201d se reconocen expresamente la personalidad juridica con la que "
-        "se ostentan para todos los efectos legales a que haya lugar.")
-    par("\u201cLAS PARTES\u201d acuerdan sujetarse al tenor de las siguientes:")
-    par("C L A U S U L A S:", bold=True, center=True)
-    par(f"PRIMERA.- \u201cEL TRABAJADOR\u201d se obliga a prestar sus servicios personales a "
-        f"\u201cEL PATRON\u201d, subordinandose juridicamente para ocupar el puesto de {puesto}, "
-        f"conviniendo que este trabajo debera ejecutarlo con cuidado, esmero, eficiencia y en la forma, "
-        f"tiempo y lugar convenido, acatando el Reglamento Interior de Trabajo y las disposiciones que "
-        f"dicte \u201cEL PATRON\u201d, sobremanera lo senalado por el articulo 27 de la Ley Federal del "
-        f"Trabajo; las actividades que ejecutara son las propias del puesto de {puesto} y las que se "
-        f"relacionen directa e indirectamente, de manera enunciativa y no limitativa.")
-    par("SEGUNDA.- \u201cEL TRABAJADOR\u201d debera ejecutar su trabajo en las oficinas, "
-        "establecimientos, talleres, bodegas y en general en cualquier lugar donde \u201cEL PATRON\u201d "
-        "ordene desempenar las actividades, solo las que correspondan con su puesto y demas relacionadas.")
-    par("TERCERA.- Este contrato se celebra por tiempo indeterminado, conforme al articulo 35 de la Ley "
-        "Federal del Trabajo.")
-    par(f"CUARTA.- Por los servicios contratados, \u201cEL PATRON\u201d pagara a \u201cEL TRABAJADOR\u201d "
-        f"un salario diario de ${salario:,.2f} (*** {pesos_letra(salario)} ***); el cual bajo ninguna "
-        f"circunstancia sera inferior al salario minimo del area geografica donde preste sus servicios. "
-        f"El salario se fijara de manera semanal, en moneda de curso legal, y podra pagarse en efectivo, "
-        f"deposito en cuenta bancaria, tarjeta de debito, transferencias o cualquier otro medio "
-        f"electronico, lo cual \u201cEL TRABAJADOR\u201d autoriza a la firma del presente contrato.")
-    par("\u201cEL TRABAJADOR\u201d autoriza a \u201cEL PATRON\u201d para que deduzca de su salario los "
-        "impuestos a su cargo, las cuotas obreras al IMSS y cualquier otra cantidad conforme al articulo "
-        "110 de la Ley Federal del Trabajo.")
-    par_seg(["QUINTA.- \u201cEL PATRON\u201d entregara los recibos de nomina de \u201cEL TRABAJADOR\u201d "
-             "al correo electronico ", blank(),
-             ", conforme al articulo 101 de la Ley Federal del Trabajo."])
-    par("SEXTA.- La duracion de la jornada sera de 48 horas a la semana, pudiendo las partes repartir las "
-        "horas de trabajo conforme a las necesidades del centro de trabajo, en terminos del articulo 59 "
-        "de la Ley Federal del Trabajo.")
-    par("SEPTIMA.- El tiempo extraordinario se pagara conforme a la Ley Federal del Trabajo y solo se "
-        "laborara previa solicitud expresa y por escrito de \u201cEL PATRON\u201d y aceptacion por escrito "
-        "de \u201cEL TRABAJADOR\u201d, sin exceder de tres horas diarias ni tres veces por semana.")
-    par("OCTAVA.- \u201cEL TRABAJADOR\u201d esta obligado a registrar su asistencia a la entrada y salida "
-        "de sus labores en la forma que establezca \u201cEL PATRON\u201d.")
-    par("NOVENA.- \u201cEL TRABAJADOR\u201d tendra derecho a un dia de descanso semanal con goce de salario "
-        "integro, preferentemente el domingo, segun las condiciones del centro de trabajo.")
-    par("DECIMA.- Despues de un ano de servicios \u201cEL TRABAJADOR\u201d disfrutara del periodo anual de "
-        "vacaciones pagadas y prima vacacional conforme a la Ley Federal del Trabajo.")
-    par("DECIMA PRIMERA.- \u201cEL TRABAJADOR\u201d percibira un aguinaldo anual, pagadero antes del 20 de "
-        "diciembre, equivalente a 15 dias de salario, conforme al articulo 87 de la Ley Federal del Trabajo.")
-    par("DECIMA SEGUNDA.- \u201cEL TRABAJADOR\u201d conviene en someterse a los reconocimientos medicos que "
-        "ordene \u201cEL PATRON\u201d en terminos del articulo 134 fraccion X de la Ley Federal del Trabajo.")
-    par("DECIMA TERCERA.- \u201cEL TRABAJADOR\u201d sera capacitado y adiestrado conforme a los planes y "
-        "programas que establezca \u201cEL PATRON\u201d, comprometiendose a participar en ellos.")
-    par_seg(["DECIMA CUARTA.- \u201cEL TRABAJADOR\u201d, en terminos del articulo 25 fraccion X y del "
-             "diverso 501 de la Ley Federal del Trabajo, designa como beneficiario(s) a ", blank(), "."])
-    par("DECIMA QUINTA.- \u201cEL TRABAJADOR\u201d se obliga a guardar discrecion y estricta "
-        "confidencialidad de la informacion, datos o documentos confidenciales y reservados de "
-        "\u201cEL PATRON\u201d, durante la vigencia del contrato y hasta por cinco anos posteriores.")
-    par(f"DECIMA SEXTA.- El presente contrato anula cualquier otro contrato o convenio anterior entre "
-        f"\u201cLAS PARTES\u201d. Para todo lo relativo a su interpretacion, cumplimiento y ejecucion, "
-        f"\u201cLAS PARTES\u201d se someten a la jurisdiccion de los Tribunales del estado de "
-        f"{estado_obra or BL}, renunciando a cualquier otra.")
-    par(f"Leido que fue el presente contrato por \u201cLAS PARTES\u201d, e impuestas de su contenido y "
-        f"fuerza legal, lo firmaron, quedando un tanto en poder de cada una. {estado_obra}, a {fecha_txt}.",
-        space=24)
-    par("_________________________________          _________________________________", center=True, space=2)
-    par(f"C. {rep}                              C. {nombre}", center=True, space=2)
-    par(f"En representacion legal de: {razon}", center=True, space=12)
-    par("\u201cEL PATRON\u201d                                        \u201cEL TRABAJADOR\u201d",
-        bold=True, center=True)
+    par("DECLARACIONES", bold=True, center=True)
+    par("I. Declara EL PATR\u00d3N", bold=True)
+    par_seg([
+        "Que es una sociedad legalmente constituida conforme a las leyes mexicanas mediante "
+        "instrumento notarial n\u00famero ", dato(instr), " de fecha ", dato(fesc),
+        ", otorgado ante la fe del Lic. ", dato(not_nom), ", Notario P\u00fablico n\u00famero ", dato(not_num),
+        " de ", dato(not_ciu), ", e inscrito bajo folio mercantil electr\u00f3nico ", blank(),
+        " de fecha ", blank(), ".",
+    ])
+    par_seg([
+        "Que su Registro Federal de Contribuyentes es ", dato(rfc_emp),
+        " y su registro patronal ante el IMSS es ", blank(), ".",
+    ])
+    par_seg([
+        "Que se\u00f1ala como domicilio para efectos de este contrato el ubicado en ", dato(dom),
+        ", y como correo de recursos humanos ", blank(), ".",
+    ])
+    par_seg([
+        "Que su representante cuenta con facultades suficientes y vigentes para suscribir este "
+        "contrato, seg\u00fan ", blank(), ".",
+    ])
+    par_seg([
+        "Que requiere servicios personales subordinados para el puesto de ", dato(puesto),
+        ", conforme a la descripci\u00f3n objetiva de funciones incluida en el Anexo 1.",
+    ])
+    par("II. Declara EL TRABAJADOR", bold=True)
+    par_seg(["Nombre completo: ", dato(nombre)])
+    par_seg(["Nacionalidad: ", "MEXICANA"])
+    par_seg(["Fecha de nacimiento y edad al firmar: ", dato(fecha_nac_txt), " / ",
+             dato(str(edad) + " a\u00f1os" if edad != "" else None)])
+    par_seg(["Sexo y estado civil: ", dato(sexo_txt), " / ", blank()])
+    par_seg(["CURP: ", dato(emp["curp"])])
+    par_seg(["RFC: ", dato(emp["rfc"])])
+    par_seg(["N\u00famero de Seguridad Social: ", dato(nss_txt)])
+    par_seg(["Domicilio particular completo: ", blank()])
+    par_seg(["Tel\u00e9fono y correo personal: ", blank(), " / ", blank()])
+    par_seg(["Identificaci\u00f3n oficial: ", blank()])
+    par("Que la informaci\u00f3n y documentos entregados son aut\u00e9nticos y se obliga a comunicar por "
+        "escrito cualquier cambio de domicilio o datos de contacto dentro de los diez d\u00edas "
+        "naturales siguientes. Esta manifestaci\u00f3n no implica renuncia de derechos ni autoriza "
+        "descuentos no permitidos por la ley.")
+    par("Que cuenta con la capacidad, experiencia y aptitudes necesarias para prestar los "
+        "servicios contratados, y que informar\u00e1 de inmediato cualquier restricci\u00f3n m\u00e9dica o "
+        "condici\u00f3n de riesgo relevante para realizar de manera segura las labores, sin perjuicio "
+        "de sus derechos de privacidad y no discriminaci\u00f3n.")
+    par("III. Declaran LAS PARTES", bold=True)
+    par_seg([
+        "Que existe o ha existido prestaci\u00f3n de servicios previa. Para evitar contradicciones, "
+        "reconocen como fecha real de ingreso y antig\u00fcedad la que resulte de la evidencia laboral "
+        "y de seguridad social: ", dato(fecha_alta_txt), ".",
+    ])
+    par("Que este instrumento documenta hacia futuro las condiciones vigentes de una relaci\u00f3n por "
+        "tiempo indeterminado y no reduce salarios, prestaciones ni derechos ya devengados. Por "
+        "existir servicios previos, no se establece un nuevo periodo a prueba ni de capacitaci\u00f3n "
+        "inicial.")
+    par_seg([
+        "Que a la fecha de firma existe el siguiente instrumento colectivo aplicable: ", blank(), ".",
+    ])
+    par("CL\u00c1USULAS", bold=True, center=True)
+    par("PRIMERA. NATURALEZA Y ANTIG\u00dcEDAD", bold=True)
+    par_seg([
+        "La relaci\u00f3n de trabajo es por tiempo indeterminado. EL PATR\u00d3N reconoce la antig\u00fcedad de "
+        "EL TRABAJADOR desde ", dato(fecha_alta_txt),
+        ". Cualquier diferencia entre esta fecha y documentos anteriores deber\u00e1 aclararse con base "
+        "en los registros del IMSS, n\u00f3mina, transferencias y controles de asistencia, sin simular "
+        "ni alterar hechos pasados.",
+    ])
+    par("SEGUNDA. PUESTO, \u00c1REA Y DEPENDENCIA", bold=True)
+    par_seg([
+        "EL TRABAJADOR prestar\u00e1 servicios como ", dato(puesto), ", adscrito al \u00e1rea de ",
+        dato(obra_nom), " y reportar\u00e1 a ", blank(), " o a quien legalmente lo sustituya. El puesto "
+        "no es de confianza salvo que las funciones reales satisfagan los requisitos de la Ley "
+        "Federal del Trabajo.",
+    ])
+    par("TERCERA. SERVICIOS Y ALCANCE DEL PUESTO", bold=True)
+    par("Las funciones se describen con precisi\u00f3n en el Anexo 1, que forma parte integrante del "
+        "contrato. EL TRABAJADOR ejecutar\u00e1 tambi\u00e9n actividades conexas o complementarias "
+        "compatibles con su categor\u00eda, capacitaci\u00f3n, aptitudes y condiciones de seguridad, cuando "
+        "sean razonablemente instruidas por EL PATR\u00d3N.")
+    par("No se entender\u00e1 autorizada la operaci\u00f3n de maquinaria, trabajo en alturas, izaje, "
+        "espacios confinados, soldadura especializada, maniobras el\u00e9ctricas o cualquier actividad "
+        "de riesgo para la que EL TRABAJADOR no cuente con capacitaci\u00f3n, autorizaci\u00f3n, permiso de "
+        "trabajo y equipo de protecci\u00f3n aplicables.")
+    par("CUARTA. SUBORDINACI\u00d3N E INSTRUCCIONES", bold=True)
+    par("EL TRABAJADOR prestar\u00e1 el servicio bajo la direcci\u00f3n de EL PATR\u00d3N, por conducto de sus "
+        "supervisores autorizados, y cumplir\u00e1 instrucciones relacionadas con el trabajo, calidad, "
+        "seguridad, uso de materiales y programaci\u00f3n. Las instrucciones no podr\u00e1n implicar "
+        "renuncia de derechos, reducci\u00f3n salarial ni exposici\u00f3n a un riesgo grave e inminente.")
+    par("Las \u00f3rdenes relevantes de producci\u00f3n, cambios de frente, autorizaciones de tiempo "
+        "extraordinario, entrega de equipo y observaciones de desempe\u00f1o deber\u00e1n documentarse por "
+        "medios verificables.")
+    par("QUINTA. LUGAR DE TRABAJO Y ASIGNACIONES TEMPORALES", bold=True)
+    par_seg([
+        "El centro de trabajo ordinario ser\u00e1 ", blank(), ". Por la naturaleza de la construcci\u00f3n y "
+        "fabricaci\u00f3n, EL TRABAJADOR podr\u00e1 ser asignado temporalmente a talleres, obras o "
+        "instalaciones de clientes en ", dato(estado_obra or None),
+        ", siempre que la asignaci\u00f3n sea l\u00edcita, razonable, compatible con el puesto y comunicada "
+        "por escrito.",
+    ])
+    par("Cuando la asignaci\u00f3n requiera traslado fuera de la residencia habitual o genere gastos "
+        "extraordinarios, EL PATR\u00d3N cubrir\u00e1 o reembolsar\u00e1, contra comprobaci\u00f3n y conforme a "
+        "pol\u00edtica entregada, los conceptos legalmente procedentes de transporte, hospedaje y "
+        "alimentaci\u00f3n. Ning\u00fan traslado reducir\u00e1 el salario o las prestaciones.")
+    par("SEXTA. JORNADA Y HORARIO ORDINARIO", bold=True)
+    par_seg([
+        "La jornada ordinaria vigente al firmar ser\u00e1: ", blank(), ". El periodo para alimentos "
+        "ser\u00e1 de ", blank(), " y EL TRABAJADOR ", blank(), " podr\u00e1 disponer libremente de ese "
+        "tiempo y salir del \u00e1rea de trabajo. Si debe permanecer a disposici\u00f3n de EL PATR\u00d3N, el "
+        "tiempo se computar\u00e1 como jornada.",
+    ])
+    par("La jornada efectiva nunca exceder\u00e1 el m\u00e1ximo legal aplicable. Conforme al r\u00e9gimen "
+        "transitorio vigente: 48 horas semanales en 2026; 46 en 2027; 44 en 2028; 42 en 2029; y "
+        "40 a partir de 2030. LAS PARTES ajustar\u00e1n por escrito la distribuci\u00f3n antes de cada "
+        "reducci\u00f3n, sin disminuir salario ni prestaciones.")
+    par("La distribuci\u00f3n del horario podr\u00e1 modificarse por acuerdo escrito para atender "
+        "necesidades de producci\u00f3n u obra, respetando los l\u00edmites diarios, descansos, vida digna "
+        "y dem\u00e1s disposiciones legales.")
+    par("S\u00c9PTIMA. DESCANSOS", bold=True)
+    par_seg([
+        "El d\u00eda de descanso semanal ordinario ser\u00e1 ", blank(), ", con goce de salario \u00edntegro. El "
+        "trabajo en domingo generar\u00e1 la prima dominical legal y el trabajo en d\u00eda de descanso "
+        "semanal u obligatorio se pagar\u00e1 conforme a la ley, sin que se considere incluido en el "
+        "salario ordinario.",
+    ])
+    par("OCTAVA. ASISTENCIA Y REGISTRO DE JORNADA", bold=True)
+    par("EL TRABAJADOR registrar\u00e1 personalmente sus entradas, salidas, descansos y, en su caso, "
+        "tiempo extraordinario mediante el sistema autorizado. Queda prohibido registrar por otra "
+        "persona, alterar controles o trabajar fuera de registro.")
+    par("EL PATR\u00d3N conservar\u00e1 los controles de jornada y proporcionar\u00e1, cuando legalmente proceda, "
+        "acceso o constancia. El uso de biometr\u00eda estar\u00e1 sujeto a un aviso de privacidad "
+        "espec\u00edfico, medidas de seguridad y finalidad laboral leg\u00edtima. La falla del sistema "
+        "deber\u00e1 reportarse de inmediato al supervisor y a recursos humanos por un medio "
+        "verificable.")
+    par("NOVENA. TIEMPO EXTRAORDINARIO", bold=True)
+    par("El tiempo extraordinario s\u00f3lo se laborar\u00e1 por necesidad excepcional y con autorizaci\u00f3n "
+        "previa y verificable del supervisor designado. La falta de autorizaci\u00f3n no elimina el "
+        "pago del tiempo efectivamente laborado cuando EL PATR\u00d3N lo orden\u00f3, conoci\u00f3 o toler\u00f3; "
+        "podr\u00e1, sin embargo, dar lugar a medidas disciplinarias v\u00e1lidas si se incumpli\u00f3 el "
+        "procedimiento.")
+    par("Las horas extraordinarias se registrar\u00e1n y pagar\u00e1n con los recargos legales. Durante "
+        "2026 y 2027, el l\u00edmite ordinario transitorio es de nueve horas extraordinarias por "
+        "semana; despu\u00e9s se aplicar\u00e1n los m\u00e1ximos vigentes. La suma de jornada ordinaria y "
+        "extraordinaria no podr\u00e1 superar el l\u00edmite diario legal.")
+    par("D\u00c9CIMA. SALARIO Y FORMA DE PAGO", bold=True)
+    par_seg([
+        "EL TRABAJADOR percibir\u00e1 un salario bruto semanal de ", dato(f"${sueldo_semanal:,.2f}" if sueldo_semanal else None),
+        f" ({pesos_letra(sueldo_semanal)})" if sueldo_semanal else blank(),
+        ", equivalente para efectos ordinarios a un salario diario base de ",
+        dato(f"${salario_diario:,.2f}" if salario_diario else None),
+        ". Se pagar\u00e1 el d\u00eda ", blank(), " mediante ", dato(medio_pago),
+        ", en la cuenta designada por EL TRABAJADOR, sin costo para \u00e9ste.",
+    ])
+    par("El salario semanal incluye el pago del descanso semanal en los t\u00e9rminos legales, pero no "
+        "incluye horas extraordinarias efectivamente laboradas, primas, trabajo en d\u00edas de "
+        "descanso u obligatorio, vi\u00e1ticos ni otras prestaciones que deban pagarse por separado.")
+    par("EL PATR\u00d3N expedir\u00e1 los CFDI de n\u00f3mina y comprobantes correspondientes. EL TRABAJADOR "
+        "revisar\u00e1 y reportar\u00e1 discrepancias; la firma o recepci\u00f3n de un recibo no implica renuncia "
+        "a diferencias que legalmente procedan.")
+    par("D\u00c9CIMA PRIMERA. DEDUCCIONES", bold=True)
+    par("\u00danicamente se efectuar\u00e1n retenciones y descuentos permitidos por la ley y con los "
+        "requisitos aplicables. No habr\u00e1 multas, descuentos autom\u00e1ticos por herramientas, "
+        "materiales, errores, retardos o da\u00f1os, ni compensaciones contra salario fuera de los "
+        "casos legalmente autorizados.")
+    par("La falta de prestaci\u00f3n efectiva por una ausencia podr\u00e1 reflejarse proporcionalmente en "
+        "n\u00f3mina, sin perjuicio de analizar justificantes, incapacidades y derechos de descanso. "
+        "Cualquier convenio de descuento permitido deber\u00e1 identificar monto, causa y forma de "
+        "amortizaci\u00f3n.")
+    par("D\u00c9CIMA SEGUNDA. PRESTACIONES", bold=True)
+    par("EL TRABAJADOR disfrutar\u00e1 de vacaciones conforme a su antig\u00fcedad, con al menos doce d\u00edas "
+        "continuos cuando nazca el primer derecho, salvo que decida distribuirlos, y de una prima "
+        "vacacional no inferior al veinticinco por ciento. Las vacaciones se conceder\u00e1n dentro de "
+        "los seis meses siguientes al aniversario correspondiente y se documentar\u00e1n.")
+    par("EL PATR\u00d3N pagar\u00e1 aguinaldo anual no inferior a quince d\u00edas de salario antes del veinte de "
+        "diciembre, o la parte proporcional; participaci\u00f3n de utilidades cuando proceda; descansos "
+        "obligatorios; prima dominical; permisos de paternidad; licencias e incapacidades, y las "
+        "dem\u00e1s prestaciones previstas por la ley o condiciones m\u00e1s favorables vigentes.")
+    par("Cualquier bono o incentivo se regir\u00e1 por un plan escrito que identifique periodo, "
+        "m\u00e9tricas, condiciones de devengo y fecha de pago. Su denominaci\u00f3n no alterar\u00e1 la "
+        "integraci\u00f3n salarial que legalmente corresponda.")
+    par("D\u00c9CIMA TERCERA. SEGURIDAD SOCIAL", bold=True)
+    par_seg([
+        "EL PATR\u00d3N mantendr\u00e1 a EL TRABAJADOR inscrito ante el IMSS con el salario base de "
+        "cotizaci\u00f3n legalmente integrado y efectuar\u00e1 las aportaciones al INFONAVIT y al sistema de "
+        "ahorro para el retiro. Fecha de alta o reingreso: ", dato(fecha_alta_txt),
+        "; salario base de cotizaci\u00f3n inicial o vigente: ",
+        dato("No aplica (pensionado)" if es_pensionado else (f"${salario_cotizacion:,.2f}" if salario_cotizacion else None)),
+        ".",
+    ])
+    par("D\u00c9CIMA CUARTA. CAPACITACI\u00d3N Y EVALUACI\u00d3N", bold=True)
+    par("EL TRABAJADOR participar\u00e1 en los planes y programas de capacitaci\u00f3n, seguridad, calidad y "
+        "productividad aplicables, asistir\u00e1 puntualmente y presentar\u00e1 las evaluaciones "
+        "relacionadas con su puesto. EL PATR\u00d3N documentar\u00e1 temarios, asistencia, resultados, "
+        "constancias y acciones de refuerzo.")
+    par("Las evaluaciones ser\u00e1n objetivas, conocidas, relacionadas con las funciones del Anexo 1 y "
+        "no discriminatorias. Una evaluaci\u00f3n desfavorable no sustituye por s\u00ed sola las causas ni el "
+        "procedimiento legal de rescisi\u00f3n.")
+    par("D\u00c9CIMA QUINTA. SEGURIDAD, SALUD Y EQUIPO DE PROTECCI\u00d3N", bold=True)
+    par("EL PATR\u00d3N proporcionar\u00e1 capacitaci\u00f3n, herramientas y equipo de protecci\u00f3n personal "
+        "adecuados. EL TRABAJADOR se obliga a usarlos correctamente, participar en pl\u00e1ticas de "
+        "seguridad, respetar permisos de trabajo, bloqueo y se\u00f1alizaci\u00f3n, y reportar de inmediato "
+        "actos inseguros, incidentes, casi accidentes, defectos de equipo y riesgos.")
+    par("EL TRABAJADOR no retirar\u00e1 guardas ni anular\u00e1 dispositivos de seguridad y podr\u00e1 "
+        "interrumpir la actividad y comunicarla al supervisor cuando perciba un riesgo grave e "
+        "inminente, sin abandonar injustificadamente el centro de trabajo.")
+    par("D\u00c9CIMA SEXTA. HERRAMIENTAS, MATERIALES Y RESGUARDOS", bold=True)
+    par("Las entregas y devoluciones se documentar\u00e1n mediante resguardos con descripci\u00f3n, n\u00famero "
+        "de serie, estado, fecha y firmas. EL TRABAJADOR conservar\u00e1 los bienes con diligencia, los "
+        "usar\u00e1 s\u00f3lo para fines autorizados y reportar\u00e1 p\u00e9rdidas o da\u00f1os de inmediato.")
+    par("La responsabilidad se determinar\u00e1 despu\u00e9s de escuchar a EL TRABAJADOR y revisar evidencia "
+        "de entrega, uso, desgaste normal, capacitaci\u00f3n y causa del da\u00f1o. No se descontar\u00e1 "
+        "cantidad alguna del salario salvo que la ley lo permita y se cumplan todos sus "
+        "requisitos.")
+    par("D\u00c9CIMA S\u00c9PTIMA. CALIDAD, CONDUCTA Y PROHIBICIONES", bold=True)
+    par("EL TRABAJADOR cumplir\u00e1 planos, especificaciones, tolerancias, \u00f3rdenes de fabricaci\u00f3n, "
+        "inspecciones y controles de calidad aplicables; mantendr\u00e1 orden y limpieza; tratar\u00e1 con "
+        "respeto al personal, clientes y proveedores; y evitar\u00e1 violencia, hostigamiento, acoso, "
+        "discriminaci\u00f3n, amenazas, ri\u00f1as, actos deshonestos y da\u00f1os intencionales.")
+    par("Queda prohibido presentarse o laborar bajo efectos que comprometan la seguridad, consumir "
+        "alcohol o drogas durante la jornada o introducir armas, salvo herramientas de trabajo "
+        "expresamente autorizadas. Las medidas preventivas y pruebas m\u00e9dicas deber\u00e1n ser "
+        "pertinentes al riesgo, respetuosas de la dignidad y confidenciales.")
+    par("D\u00c9CIMA OCTAVA. CONFIDENCIALIDAD", bold=True)
+    par("EL TRABAJADOR mantendr\u00e1 reservada la informaci\u00f3n t\u00e9cnica, comercial, financiera, de "
+        "costos, cotizaciones, clientes, proveedores, planos, listas de materiales, procesos y "
+        "datos personales a la que acceda por raz\u00f3n del trabajo, cuando no sea p\u00fablica y EL "
+        "PATR\u00d3N adopte medidas razonables para conservarla confidencial.")
+    par("La obligaci\u00f3n no impide revelar informaci\u00f3n a una autoridad competente, denunciar hechos "
+        "il\u00edcitos, ejercer derechos laborales o usar conocimientos generales y experiencia "
+        "profesional. Al terminar la relaci\u00f3n, EL TRABAJADOR devolver\u00e1 soportes, documentos y "
+        "accesos. EL PATR\u00d3N podr\u00e1 ejercer las acciones legales procedentes por uso o revelaci\u00f3n "
+        "il\u00edcitos, sin retener salarios ni prestaciones.")
+    par("D\u00c9CIMA NOVENA. DOCUMENTOS Y RESULTADOS DE TRABAJO", bold=True)
+    par("Los planos modificados, listas de corte, formatos, reportes, procedimientos y dem\u00e1s "
+        "resultados elaborados dentro de las funciones, con recursos de EL PATR\u00d3N y para sus "
+        "proyectos, pertenecer\u00e1n a EL PATR\u00d3N en la medida permitida por la legislaci\u00f3n aplicable, "
+        "respetando los derechos morales irrenunciables.")
+    par("EL TRABAJADOR no retirar\u00e1 originales ni copias sin autorizaci\u00f3n y entregar\u00e1 archivos, "
+        "contrase\u00f1as institucionales, avances y documentaci\u00f3n al cambiar de puesto o terminar la "
+        "relaci\u00f3n.")
+    par("VIG\u00c9SIMA. DATOS PERSONALES", bold=True)
+    par("EL PATR\u00d3N tratar\u00e1 los datos personales y, en su caso, sensibles de EL TRABAJADOR conforme "
+        "al aviso de privacidad para personal que se entregar\u00e1 por separado. S\u00f3lo se recabar\u00e1n "
+        "datos necesarios para la relaci\u00f3n laboral, seguridad social, seguridad y cumplimiento "
+        "legal, con las medidas de protecci\u00f3n aplicables.")
+    par("La firma de este contrato no sustituye el aviso de privacidad ni implica consentimiento "
+        "ilimitado. Los sistemas biom\u00e9tricos, videovigilancia o evaluaciones m\u00e9dicas deber\u00e1n "
+        "informarse espec\u00edficamente cuando se utilicen.")
+    par("VIG\u00c9SIMA PRIMERA. AVISOS Y ACTUALIZACI\u00d3N DE DATOS", bold=True)
+    par("Los avisos operativos podr\u00e1n realizarse personalmente, por correo institucional, "
+        "plataforma o mensajer\u00eda al dato registrado, conservando evidencia. EL TRABAJADOR "
+        "actualizar\u00e1 domicilio y contacto. Los avisos de rescisi\u00f3n o actos que exijan formalidad "
+        "se practicar\u00e1n exactamente en la forma prevista por la ley.")
+    par("VIG\u00c9SIMA SEGUNDA. REGLAMENTO INTERIOR Y DISCIPLINA", bold=True)
+    par_seg([
+        "Ser\u00e1 aplicable exclusivamente el Reglamento Interior de Trabajo de EL PATR\u00d3N que haya "
+        "sido elaborado, depositado, entregado y publicado conforme a la ley. Datos de dep\u00f3sito: ",
+        blank(), ".",
+    ])
+    par("Las medidas disciplinarias deber\u00e1n estar previstas en un reglamento v\u00e1lido, ser "
+        "proporcionales, documentadas y aplicarse despu\u00e9s de escuchar a EL TRABAJADOR. No se "
+        "impondr\u00e1n multas. La suspensi\u00f3n disciplinaria, cuando legalmente proceda, no exceder\u00e1 de "
+        "ocho d\u00edas.")
+    par("VIG\u00c9SIMA TERCERA. AUSENCIAS, RETARDOS Y PERMISOS", bold=True)
+    par("EL TRABAJADOR notificar\u00e1 ausencias o retardos tan pronto como sea razonablemente posible "
+        "y entregar\u00e1 los justificantes correspondientes. Las incapacidades se acreditar\u00e1n con la "
+        "documentaci\u00f3n del IMSS o la legalmente procedente.")
+    par("Las faltas se analizar\u00e1n individualmente; \u00fanicamente podr\u00e1n producir consecuencias "
+        "conforme a la ley, al reglamento v\u00e1lidamente depositado y a la evidencia. No se "
+        "considerar\u00e1 autom\u00e1ticamente toda ausencia como falta grave.")
+    par("VIG\u00c9SIMA CUARTA. RESCISI\u00d3N Y TERMINACI\u00d3N", bold=True)
+    par("La relaci\u00f3n s\u00f3lo podr\u00e1 rescindirse o terminarse por las causas y mediante los "
+        "procedimientos previstos en la Ley Federal del Trabajo. Si EL PATR\u00d3N rescinde, entregar\u00e1 "
+        "aviso escrito que identifique claramente las conductas y fechas, o lo comunicar\u00e1 al "
+        "Tribunal competente dentro del plazo legal.")
+    par("No se firmar\u00e1n renuncias, finiquitos, constancias de terminaci\u00f3n ni hojas en blanco "
+        "anticipadamente. Todo convenio de terminaci\u00f3n o liquidaci\u00f3n deber\u00e1 contener hechos y "
+        "conceptos desglosados y, para m\u00e1xima certeza, ratificarse ante el Centro de Conciliaci\u00f3n "
+        "o Tribunal competente.")
+    par("VIG\u00c9SIMA QUINTA. MODIFICACIONES Y CONDICIONES M\u00c1S FAVORABLES", bold=True)
+    par("Las modificaciones a condiciones esenciales constar\u00e1n por escrito y respetar\u00e1n la ley y "
+        "derechos adquiridos. La tolerancia u omisi\u00f3n aislada no modifica por s\u00ed sola el contrato; "
+        "las condiciones m\u00e1s favorables que se acrediten continuar\u00e1n vigentes cuando legalmente "
+        "corresponda.")
+    par("La nulidad de una estipulaci\u00f3n no afectar\u00e1 las dem\u00e1s; ser\u00e1 sustituida por la disposici\u00f3n "
+        "legal aplicable sin renuncia de derechos.")
+    par("VIG\u00c9SIMA SEXTA. INSTRUMENTOS COLECTIVOS Y POL\u00cdTICAS", bold=True)
+    par("Si existe contrato colectivo aplicable, sus condiciones prevalecer\u00e1n cuando sean m\u00e1s "
+        "favorables o legalmente obligatorias. Las pol\u00edticas t\u00e9cnicas, de seguridad, calidad, "
+        "vi\u00e1ticos, uso de sistemas y protecci\u00f3n de informaci\u00f3n complementar\u00e1n este contrato sin "
+        "reducir derechos ni sustituir un Reglamento Interior de Trabajo cuando \u00e9ste sea exigible.")
+    par("VIG\u00c9SIMA S\u00c9PTIMA. LEGISLACI\u00d3N Y AUTORIDAD COMPETENTE", bold=True)
+    par("Para lo no previsto se aplicar\u00e1 la Ley Federal del Trabajo y dem\u00e1s normas vigentes. LAS "
+        "PARTES acudir\u00e1n primero a la conciliaci\u00f3n prejudicial cuando sea obligatoria y, en su "
+        "caso, al Tribunal laboral competente determinado por la ley. No existe renuncia "
+        "anticipada a competencia, derechos o acciones.")
+    par("VIG\u00c9SIMA OCTAVA. LECTURA, COPIAS Y FIRMA", bold=True)
+    par_seg([
+        "LAS PARTES declaran que leyeron el contrato y sus anexos, pudieron formular preguntas, "
+        "comprenden su alcance y reciben un ejemplar \u00edntegro en la fecha de firma. Se firma en ",
+        dato(estado_obra or None), " el ", fecha_txt, ".",
+    ], space=24)
+
+    par("FIRMAS DEL CONTRATO", bold=True, center=True, space=10)
+    par("EL TRABAJADOR", space=2)
+    par("____________________________________________", space=2)
+    par(nombre, space=12)
+    par("EL PATR\u00d3N", space=2)
+    par("____________________________________________", space=2)
+    par(f"C. {rep}", space=2)
+    par_seg(["En representación legal de: ", dato(razon)], space=12)
+    par("TESTIGO 1", space=2)
+    par("____________________________________________", space=2)
+    par("_______________________________ (nombre completo y firma)", space=12)
+    par("TESTIGO 2", space=2)
+    par("____________________________________________", space=2)
+    par("_______________________________ (nombre completo y firma)", space=2)
+
+    # =================== ANEXO 1 ===================
+    doc.add_page_break()
+    titulo_seccion("ANEXO 1. DESCRIPCI\u00d3N DEL PUESTO Y CRITERIOS DE DESEMPE\u00d1O")
+    par_seg(["Puesto: ", dato(puesto)])
+    par_seg(["\u00c1rea / proyecto: ", dato(obra_nom)])
+    par_seg(["Jefe inmediato: ", blank()])
+    par_seg(["Fecha de vigencia: ", fecha_txt])
+    par("Objetivo del puesto", bold=True)
+    par(func["objetivo"])
+    par("Funciones esenciales", bold=True)
+    for f in func["funciones"]:
+        bullet(f)
+    bullet("Cumplir instrucciones l\u00edcitas relacionadas con el puesto y actividades conexas "
+           "compatibles con su capacidad y seguridad.")
+    par("Criterios objetivos de desempe\u00f1o", bold=True)
+    par_seg(["Seguridad: ", "Uso correcto de EPP, cumplimiento de permisos y procedimientos, "
+             "reporte oportuno de riesgos e incidentes y ausencia de actos deliberadamente "
+             "inseguros."])
+    par_seg(["Calidad: ", "Cumplimiento de planos, especificaciones y tolerancias documentadas; "
+             "identificaci\u00f3n de piezas y reducci\u00f3n de retrabajo atribuible a ejecuci\u00f3n."])
+    par_seg(["Productividad: ", "Cumplimiento razonable de \u00f3rdenes y plazos considerando "
+             "complejidad, recursos, liberaciones, capacitaci\u00f3n y condiciones de obra."])
+    par_seg(["Asistencia: ", "Registros personales y completos, puntualidad y justificaci\u00f3n "
+             "oportuna de ausencias conforme a la pol\u00edtica v\u00e1lida."])
+    par_seg(["Cuidado de bienes: ", "Resguardos completos, uso autorizado, mantenimiento b\u00e1sico y "
+             "reporte inmediato de fallas, p\u00e9rdidas o da\u00f1os."])
+    par_seg(["Conducta: ", "Respeto, cooperaci\u00f3n, comunicaci\u00f3n con supervisi\u00f3n y cumplimiento de "
+             "reglas contra violencia, hostigamiento, acoso y discriminaci\u00f3n."])
+    par("Registro de evaluaci\u00f3n", bold=True)
+    par_seg(["Periodo evaluado: ", blank()])
+    par_seg(["Evidencias revisadas: ", blank()])
+    par_seg(["Resultado y hechos observables: ", blank()])
+    par_seg(["Apoyo o capacitaci\u00f3n acordada: ", blank()])
+    par_seg(["Seguimiento: ", blank()])
+    par("La firma acredita recepci\u00f3n y conocimiento del contenido, no conformidad obligatoria con "
+        "una calificaci\u00f3n ni renuncia de derechos.", space=10)
+    par("EL TRABAJADOR: ____________________________    FECHA: ______________")
+    par("SUPERVISOR: _______________________________    FECHA: ______________")
+
+    # =================== ANEXO 2 ===================
+    doc.add_page_break()
+    titulo_seccion("ANEXO 2. DESIGNACI\u00d3N DE BENEFICIARIOS")
+    par("Para los efectos previstos en la Ley Federal del Trabajo respecto de salarios y "
+        "prestaciones devengadas y no cobradas por fallecimiento o desaparici\u00f3n derivada de un "
+        "acto delincuencial, EL TRABAJADOR designa a las siguientes personas. Los porcentajes "
+        "deber\u00e1n sumar 100% y la designaci\u00f3n podr\u00e1 actualizarse por escrito.")
+    for i in (1, 2, 3):
+        par(f"Beneficiario {i}", bold=True)
+        par_seg(["Nombre completo: ", blank()])
+        par_seg(["Parentesco o relaci\u00f3n: ", blank()])
+        par_seg(["CURP: ", blank()])
+        par_seg(["Domicilio y tel\u00e9fono: ", blank()])
+        par_seg(["Porcentaje: ", blank()])
+    par("TOTAL: 100%", bold=True, space=10)
+    par("Firma de EL TRABAJADOR: ____________________________________________")
+    par("Lugar y fecha: ______________________________________________________")
+
+    # =================== ANEXO 3 ===================
+    doc.add_page_break()
+    titulo_seccion("ANEXO 3. CONSTANCIA DE ENTREGA Y EXPEDIENTE PROBATORIO")
+    par("Este anexo se completa al momento de la firma. Cada elemento entregado o recibido debe "
+        "tener fecha, nombre y firma; cuando corresponda, anexar copia del comprobante.")
+    for txt in [
+        "Ejemplar completo del contrato y anexos entregado a EL TRABAJADOR.",
+        "Copia de identificaci\u00f3n, CURP, RFC, constancia de situaci\u00f3n fiscal y NSS recibida y "
+        "verificada.",
+        "Aviso de alta o modificaci\u00f3n ante IMSS y salario base de cotizaci\u00f3n incorporados al "
+        "expediente.",
+        "Aviso de privacidad para personal entregado; aviso espec\u00edfico de "
+        "biometr\u00eda/videovigilancia, si aplica.",
+        "Reglamento Interior de Trabajo de la raz\u00f3n social correcta entregado, con datos de "
+        "dep\u00f3sito ante CFCRL.",
+        "Descripci\u00f3n de puesto, reglas de seguridad, pol\u00edtica de tiempo extraordinario y canal de "
+        "reporte entregados.",
+        "Equipo de protecci\u00f3n personal entregado mediante resguardo con estado, fecha y firmas.",
+        "Herramientas, equipos, dispositivos o accesos entregados mediante resguardo individual.",
+        "Capacitaci\u00f3n inicial y espec\u00edfica registrada con temario, instructor, fecha, evaluaci\u00f3n y "
+        "constancia.",
+        "Cuenta bancaria autorizada por EL TRABAJADOR para pago de n\u00f3mina y medio de entrega de "
+        "CFDI registrados.",
+        "Contacto de emergencia y designaci\u00f3n de beneficiarios actualizados.",
+    ]:
+        bullet(txt)
+    par_seg(["Observaciones y documentos pendientes: ", blank()], space=10)
+    par("EL TRABAJADOR confirma haber recibido \u00fanicamente los documentos marcados como "
+        "entregados, sin que esta constancia sustituya su contenido ni implique renuncia de "
+        "derechos.")
+    par("EL TRABAJADOR: ____________________________    FECHA: ______________")
+    par("POR EL PATR\u00d3N: ____________________________    FECHA: ______________")
 
     buf = io.BytesIO(); doc.save(buf); buf.seek(0)
     slug = re.sub(r"[^A-Za-z0-9]+", "_", nombre).strip("_")
@@ -1128,7 +1610,8 @@ def crear_contrato_para(db, empleado_id, avisar_a=None):
     """Genera y guarda el contrato de un empleado. Si 'avisar_a' es un correo,
     lo envia como adjunto. Devuelve el id del contrato o None."""
     emp = db.execute(
-        "SELECT e.*, p.nombre AS puesto, o.estado, o.nombre AS obra "
+        "SELECT e.*, p.nombre AS puesto, p.clasificacion, p.sueldo_semanal, p.viaticos_semanales, "
+        "o.estado, o.nombre AS obra "
         "FROM empleados e JOIN puestos p ON p.id=e.puesto_id "
         "JOIN obras o ON o.id=p.obra_id WHERE e.id=?", (empleado_id,)).fetchone()
     if not emp:
@@ -2392,6 +2875,35 @@ def contratos_generar_todos():
         flash(f"Se generaron {generados} contratos del personal dado de alta.", "success")
     else:
         flash("No habia contratos por generar (todo el personal activo ya tiene contrato).", "info")
+    return redirect(url_for("contratos"))
+
+
+@app.route("/contratos/regenerar-todos", methods=["POST"])
+@min_rank(ADMIN_RANK)
+def contratos_regenerar_todos():
+    """Regenera el contrato de TODO el personal activo con el formato mas reciente,
+    tenga o no un contrato ya generado. Cada regeneracion crea un registro nuevo en
+    Contratos (no borra los anteriores, para conservar el historial)."""
+    db = get_db()
+    vis = obras_del_usuario(db)
+    sql = ("SELECT e.id FROM empleados e JOIN puestos p ON p.id=e.puesto_id "
+           "WHERE (e.estatus IS NULL OR e.estatus != 'baja')")
+    args = []
+    if vis is not None:
+        if vis:
+            sql += " AND p.obra_id IN (%s)" % ",".join("?" * len(vis)); args += vis
+        else:
+            sql += " AND 0"
+    ids = [r["id"] for r in db.execute(sql, args).fetchall()]
+    generados = 0
+    for eid in ids:
+        try:
+            crear_contrato_para(db, eid, avisar_a=None)
+            generados += 1
+        except Exception as e:
+            app.logger.error("Contrato regenerar-todos (emp %s): %s", eid, e)
+    db.commit()
+    flash(f"Se regeneraron {generados} contratos con el formato mas reciente.", "success")
     return redirect(url_for("contratos"))
 
 

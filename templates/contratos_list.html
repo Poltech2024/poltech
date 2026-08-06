@@ -3,10 +3,18 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h3 class="mb-0">Contratos generados</h3>
-  <form method="post" action="{{ url_for('contratos_generar_todos') }}"
-        onsubmit="return confirm('Generar el contrato de todo el personal activo que aun no tenga uno?');">
-    <button class="btn btn-primary">Generar contratos del personal dado de alta</button>
-  </form>
+  <div class="d-flex gap-2">
+    {% if current_user.rank >= ADMIN_RANK %}
+    <form method="post" action="{{ url_for('contratos_regenerar_todos') }}"
+          onsubmit="return confirm('Regenerar el contrato de TODO el personal activo con el formato mas reciente? Los contratos anteriores se conservan en el historial, esto no los borra.');">
+      <button class="btn btn-outline-dark">Regenerar todos (formato mas reciente)</button>
+    </form>
+    {% endif %}
+    <form method="post" action="{{ url_for('contratos_generar_todos') }}"
+          onsubmit="return confirm('Generar el contrato de todo el personal activo que aun no tenga uno?');">
+      <button class="btn btn-primary">Generar contratos del personal dado de alta</button>
+    </form>
+  </div>
 </div>
 <p class="text-muted small">Cada alta genera el contrato del trabajador con su informacion. Los datos que el
 sistema no captura (escolaridad, estado civil, domicilio, beneficiario, correo) quedan como linea para
