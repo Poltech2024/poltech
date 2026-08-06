@@ -40,7 +40,12 @@ El administrador ve todo.</p>
     <tbody>
       {% for u in usuarios %}
       <tr>
-        <td><b>{{ u.username }}</b></td>
+        <td style="min-width:200px">
+          <form method="post" action="{{ url_for('usuario_username', uid=u.id) }}" class="d-flex gap-1">
+            <input name="username" type="email" class="form-control form-control-sm" value="{{ u.username }}">
+            <button class="btn btn-sm btn-outline-primary" title="Guardar correo">&#10003;</button>
+          </form>
+        </td>
         <td style="min-width:180px">
           <form method="post" action="{{ url_for('usuario_nombre', uid=u.id) }}" class="d-flex gap-1">
             <input name="nombre" class="form-control form-control-sm" value="{{ u.nombre }}">

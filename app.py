@@ -29,7 +29,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.environ.get("DB_PATH", os.path.join(APP_DIR, "poltech.db"))
 
-APP_VERSION = "1.19"   # version del sistema (visible en el menu)
+APP_VERSION = "1.20"   # version del sistema (visible en el menu)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-cambia-esta-clave-en-render")
@@ -4171,6 +4171,25 @@ def usuario_rol(uid):
         db.execute("UPDATE users SET role=? WHERE id=?", (role, uid))
         db.commit()
         flash("Rol actualizado.", "success")
+    return redirect(url_for("usuarios"))
+
+@app.route("/usuarios/<int:uid>/username", methods=["POST"])
+@min_rank(ADMIN_RANK)
+def usuario_username(uid):
+    db = get_db()
+    nuevo = request.form.get("username", "").strip().lower()
+    if not nuevo:
+        flash("El correo no puede quedar vacio.", "danger")
+    elif db.execute("SELECT 1 FROM users WHERE username=? AND id<>?", (nuevo, uid)).fetchone():
+        flash(f"Ya existe otro usuario con el correo '{nuevo}'.", "danger")
+    else:
+        db.execute("UPDATE users SET username=? WHERE id=?", (nuevo, uid))
+        db.commit()
+        registrar_bitacora(db, "Correo de usuario actualizado", f"Usuario {uid} -> {nuevo}")
+        db.commit()
+        if uid == session.get("user_id"):
+            session["username"] = nuevo
+        flash("Correo (usuario) actualizado.", "success")
     return redirect(url_for("usuarios"))
 
 @app.route("/usuarios/<int:uid>/nombre", methods=["POST"])
