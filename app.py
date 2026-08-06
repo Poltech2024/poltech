@@ -604,11 +604,13 @@ def validar_solicitud_imss(fecha_solicitud, fecha_alta):
 
 
 def dias_para_retencion(emp):
-    """Dias que faltan para que se retenga la nomina. Se ancla a la fecha de alta
-    (en la Fase 2 se re-anclara a la primera nomina). Devuelve (texto, clase_color)."""
+    """Dias que faltan para completar la documentacion. Se ancla a la fecha de
+    REGISTRO en el sistema (no a la fecha de alta real en el IMSS, que puede ser
+    anterior si el trabajador ya llevaba tiempo laborando antes de capturarlo aqui).
+    Devuelve (texto, clase_color)."""
     if (emp["estatus_docs"] or "") == "Validado":
         return ("Validado", "success")
-    base = emp["fecha_alta"]
+    base = emp["fecha_registro"] or emp["fecha_alta"]
     if not base:
         return ("-", "secondary")
     try:
