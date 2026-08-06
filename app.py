@@ -112,6 +112,18 @@ def siguiente_cedula(db):
         num += 1
     return f"{letra}{num:03d}"
 
+def siguiente_clave_otro_pago(db):
+    """Clave B001, B002... para el roster de Otros pagos semanales.
+    Es una serie propia, independiente de la cedula del checador (empleados.cedula):
+    no se usa para asistencia ni calculo de nomina, solo para identificar el registro."""
+    row = db.execute(
+        "SELECT clave FROM otros_pagos WHERE clave IS NOT NULL AND clave<>'' "
+        "ORDER BY clave DESC LIMIT 1").fetchone()
+    if not row or not row["clave"]:
+        return "B001"
+    num = int(row["clave"][1:])
+    return f"B{num + 1:03d}"
+
 
 def resolver_puesto(db, obra_nom):
     """En la carga masiva, el texto de la columna Puesto ya no se usa para elegir
@@ -333,6 +345,28 @@ CREATE TABLE IF NOT EXISTS nomina_detalle (
 CREATE TABLE IF NOT EXISTS clasificaciones (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     nombre TEXT UNIQUE NOT NULL
+);
+CREATE TABLE IF NOT EXISTS otros_pagos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    clave TEXT UNIQUE,
+    nombre TEXT NOT NULL,
+    banco TEXT,
+    tipo_cuenta TEXT,
+    numero_cuenta TEXT,
+    monto_semanal REAL NOT NULL DEFAULT 0,
+    activo INTEGER NOT NULL DEFAULT 1,
+    creado_en TEXT
+);
+CREATE TABLE IF NOT EXISTS otros_pagos_lotes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    anio INTEGER NOT NULL,
+    semana_num INTEGER NOT NULL,
+    nomina_id INTEGER,
+    obra_id INTEGER,
+    generado_por TEXT,
+    generado_en TEXT,
+    detalle_json TEXT,
+    UNIQUE(anio, semana_num)
 );
 CREATE TABLE IF NOT EXISTS bitacora (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -3163,9 +3197,15 @@ def nomina_resultado(nomina_id):
     pct_despacho = _num(get_param(db, "porcentaje_despacho", "0"))
     despacho = round(caja["neto"] * pct_despacho / 100.0, 2)
     total_a_pagar = round(caja["neto"] + despacho, 2)
+    lote_otros_pagos = None
+    if role_rank(session.get("role", "")) >= ADMIN_RANK:
+        lote_otros_pagos = db.execute(
+            "SELECT l.*, o.nombre AS obra FROM otros_pagos_lotes l LEFT JOIN obras o ON o.id=l.obra_id "
+            "WHERE l.anio=? AND l.semana_num=?", (n["anio"], n["semana_num"])).fetchone()
     return render_template("nomina_resultado.html", n=n, det=det, tot=tot,
                            bajas=bajas, por_clasif=por_clasif, caja=caja, caja_rows=caja_rows,
-                           pct_despacho=pct_despacho, despacho=despacho, total_a_pagar=total_a_pagar)
+                           pct_despacho=pct_despacho, despacho=despacho, total_a_pagar=total_a_pagar,
+                           lote_otros_pagos=lote_otros_pagos)
 
 
 @app.route("/nomina/<int:nomina_id>/eliminar", methods=["POST"])
@@ -3370,10 +3410,127 @@ def nomina_excel(nomina_id):
         cj.column_dimensions[L2].width = 16
     cj.column_dimensions["G"].width = 22
 
+    # ---- Hoja "Otros pagos semanales" (solo si quien descarga es Administrador
+    # Y ya se genero el lote de esta semana para ESTA nomina; nunca visible para
+    # superintendente/residente aunque el lote exista). ----
+    if role_rank(session.get("role", "")) >= ADMIN_RANK:
+        lote = db.execute(
+            "SELECT * FROM otros_pagos_lotes WHERE nomina_id=?", (nomina_id,)).fetchone()
+        if lote:
+            items = json.loads(lote["detalle_json"] or "[]")
+            op = wb.create_sheet("Otros pagos semanales")
+            op.append(["CLAVE", "NOMBRE", "BANCO", "TIPO CUENTA", "No. CUENTA", "MONTO"])
+            for c in op[1]:
+                c.font = Font(name="Arial", bold=True, color="FFFFFF")
+                c.fill = PatternFill("solid", fgColor=NAVY)
+            tot_op = 0.0
+            for it in items:
+                op.append([it.get("clave", ""), it.get("nombre", ""), it.get("banco", ""),
+                          it.get("tipo_cuenta", ""), it.get("numero_cuenta", ""),
+                          _num(it.get("monto"))])
+                tot_op += _num(it.get("monto"))
+            op.append(["", "", "", "", "TOTAL", round(tot_op, 2)])
+            for row in range(2, op.max_row + 1):
+                op.cell(row, 6).number_format = '#,##0.00'
+                op.cell(row, 5).number_format = "@"
+            op.column_dimensions["B"].width = 26
+            for L3 in ("A", "C", "D", "E", "F"):
+                op.column_dimensions[L3].width = 16
+
     buf = io.BytesIO(); wb.save(buf); buf.seek(0)
     nombre = f"Nomina_{re.sub(r'[^A-Za-z0-9]+','_',n['obra']).strip('_')}_{n['fecha_inicio']}.xlsx"
     return send_file(buf, as_attachment=True, download_name=nombre,
                      mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
+# ---------------------------------------------------------------------------
+# Otros pagos semanales (solo Administrador) - pagos que no son nomina de
+# trabajadores (no llevan puesto, obra, asistencia ni contrato). Se generan
+# como una hoja aparte dentro del Excel de una nomina calculada, una sola vez
+# por semana, para que el contador los pueda pagar junto con la nomina real
+# sin que se mezclen con los datos de los trabajadores.
+# ---------------------------------------------------------------------------
+@app.route("/otros-pagos", methods=["GET", "POST"])
+@min_rank(ADMIN_RANK)
+def otros_pagos():
+    db = get_db()
+    if request.method == "POST":
+        nombre = request.form.get("nombre", "").strip()
+        if not nombre:
+            flash("Escribe el nombre.", "warning")
+        else:
+            db.execute(
+                "INSERT INTO otros_pagos(clave, nombre, banco, tipo_cuenta, numero_cuenta, "
+                "monto_semanal, creado_en) VALUES(?,?,?,?,?,?,?)",
+                (siguiente_clave_otro_pago(db), titulo(nombre),
+                 request.form.get("banco", "").strip(),
+                 request.form.get("tipo_cuenta", "").strip(),
+                 solo_digitos(request.form.get("numero_cuenta", "")),
+                 float(request.form.get("monto_semanal") or 0),
+                 date.today().isoformat()))
+            db.commit()
+            flash("Agregado.", "success")
+        return redirect(url_for("otros_pagos"))
+    roster = db.execute("SELECT * FROM otros_pagos ORDER BY activo DESC, clave").fetchall()
+    lotes = [dict(r, num=len(json.loads(r["detalle_json"] or "[]"))) for r in db.execute(
+        "SELECT l.*, o.nombre AS obra FROM otros_pagos_lotes l "
+        "LEFT JOIN obras o ON o.id=l.obra_id ORDER BY l.anio DESC, l.semana_num DESC").fetchall()]
+    return render_template("otros_pagos.html", roster=roster, lotes=lotes,
+                           bancos=BANCOS, tipos=TIPOS_CUENTA)
+
+
+@app.route("/otro-pago/<int:otro_id>/desactivar", methods=["POST"])
+@min_rank(ADMIN_RANK)
+def otro_pago_desactivar(otro_id):
+    db = get_db()
+    db.execute("UPDATE otros_pagos SET activo=0 WHERE id=?", (otro_id,))
+    db.commit()
+    flash("Desactivado. Ya no se incluira en los proximos lotes.", "success")
+    return redirect(url_for("otros_pagos"))
+
+
+@app.route("/otro-pago/<int:otro_id>/reactivar", methods=["POST"])
+@min_rank(ADMIN_RANK)
+def otro_pago_reactivar(otro_id):
+    db = get_db()
+    db.execute("UPDATE otros_pagos SET activo=1 WHERE id=?", (otro_id,))
+    db.commit()
+    flash("Reactivado.", "success")
+    return redirect(url_for("otros_pagos"))
+
+
+@app.route("/nomina/<int:nomina_id>/otros-pagos/generar", methods=["POST"])
+@min_rank(ADMIN_RANK)
+def otros_pagos_generar(nomina_id):
+    db = get_db()
+    n = db.execute("SELECT * FROM nominas WHERE id=?", (nomina_id,)).fetchone()
+    if not n:
+        abort(404)
+    ya = db.execute(
+        "SELECT * FROM otros_pagos_lotes WHERE anio=? AND semana_num=?",
+        (n["anio"], n["semana_num"])).fetchone()
+    if ya:
+        flash("Ya se generaron los Otros pagos de esta semana (no se puede repetir).", "warning")
+        return redirect(url_for("nomina_resultado", nomina_id=nomina_id))
+    activos = db.execute("SELECT * FROM otros_pagos WHERE activo=1 ORDER BY clave").fetchall()
+    if not activos:
+        flash("No hay personas activas en Otros pagos semanales para generar.", "warning")
+        return redirect(url_for("nomina_resultado", nomina_id=nomina_id))
+    items = [{"clave": r["clave"], "nombre": r["nombre"], "banco": r["banco"],
+              "tipo_cuenta": r["tipo_cuenta"], "numero_cuenta": r["numero_cuenta"],
+              "monto": r["monto_semanal"]} for r in activos]
+    db.execute(
+        "INSERT INTO otros_pagos_lotes(anio, semana_num, nomina_id, obra_id, generado_por, "
+        "generado_en, detalle_json) VALUES(?,?,?,?,?,?,?)",
+        (n["anio"], n["semana_num"], nomina_id, n["obra_id"], session.get("nombre", ""),
+         datetime.now().isoformat(timespec="seconds"), json.dumps(items)))
+    registrar_bitacora(db, "Otros pagos semanales generados",
+                       f"Semana {n['semana_num']}/{n['anio']}, nomina {nomina_id}, "
+                       f"{len(items)} registro(s)")
+    db.commit()
+    flash(f"Listo: se agrego la hoja 'Otros pagos semanales' con {len(items)} registro(s) "
+          "al Excel de esta nomina.", "success")
+    return redirect(url_for("nomina_resultado", nomina_id=nomina_id))
 
 
 # ---------------------------------------------------------------------------

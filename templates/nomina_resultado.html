@@ -45,6 +45,22 @@
   </div>
 </div>
 
+{% if current_user.rank >= ADMIN_RANK %}
+<div class="alert alert-secondary d-flex justify-content-between align-items-center py-2">
+  {% if lote_otros_pagos %}
+  <span class="small">Otros pagos semanales de la semana {{ n.semana_num }}/{{ n.anio }}: ya se generaron
+    (obra: <b>{{ lote_otros_pagos.obra or n.obra }}</b>, {{ lote_otros_pagos.generado_en }}).
+    {% if lote_otros_pagos.nomina_id == n.id %}Se incluyeron en el Excel de esta nomina.{% else %}Se incluyeron en otra obra; no se pueden repetir esta semana.{% endif %}</span>
+  {% else %}
+  <span class="small">Otros pagos semanales: aun no se han generado para esta semana.</span>
+  <form method="post" action="{{ url_for('otros_pagos_generar', nomina_id=n.id) }}"
+        onsubmit="return confirm('Incluir Otros pagos semanales en el Excel de esta nomina? Solo se puede hacer una vez por semana.');">
+    <button class="btn btn-sm btn-outline-dark">Incluir Otros pagos semanales en este Excel</button>
+  </form>
+  {% endif %}
+</div>
+{% endif %}
+
 {% if bajas %}
 <div class="alert alert-warning">
   <b>Bajas reportadas en esta nomina:</b>

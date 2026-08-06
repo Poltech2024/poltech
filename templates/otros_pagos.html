@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block content %}
+<h3 class="mb-1">Otros pagos semanales</h3>
+<p class="text-muted small mb-3">Solo Administrador. No son trabajadores: no llevan puesto, obra,
+  asistencia ni contrato. Se generan como una hoja aparte dentro del Excel de una nomina calculada,
+  una sola vez por semana.</p>
+
+<div class="card p-3 mb-4">
+  <h6 class="text-navy">Agregar</h6>
+  <form method="post" class="row g-2">
+    <div class="col-md-3"><input name="nombre" class="form-control" placeholder="Nombre" required></div>
+    <div class="col-md-3">
+      <select name="banco" class="form-select">
+        <option value="">Banco...</option>
+        {% for b in bancos %}<option>{{ b }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="col-md-2">
+      <select name="tipo_cuenta" class="form-select">
+        <option value="">Tipo de cuenta...</option>
+        {% for t in tipos %}<option>{{ t }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="col-md-2"><input name="numero_cuenta" class="form-control" placeholder="No. de cuenta"></div>
+    <div class="col-md-1"><input name="monto_semanal" type="number" step="0.01" class="form-control" placeholder="Monto"></div>
+    <div class="col-md-1"><button class="btn btn-primary w-100">+</button></div>
+  </form>
+</div>
+
+<div class="card mb-4">
+  <div class="card-header bg-white fw-bold text-navy">Roster</div>
+  <table class="table table-sm mb-0 align-middle">
+    <thead><tr><th>Clave</th><th>Nombre</th><th>Banco</th><th>Tipo</th><th>Cuenta</th>
+      <th class="text-end">Monto semanal</th><th>Estado</th><th></th></tr></thead>
+    <tbody>
+      {% for r in roster %}
+      <tr class="{% if not r.activo %}text-muted{% endif %}">
+        <td>{{ r.clave }}</td><td>{{ r.nombre }}</td><td>{{ r.banco or '-' }}</td>
+        <td>{{ r.tipo_cuenta or '-' }}</td><td>{{ r.numero_cuenta or '-' }}</td>
+        <td class="text-end">{{ r.monto_semanal|money }}</td>
+        <td>{% if r.activo %}<span class="badge text-bg-success">Activo</span>{% else %}<span class="badge text-bg-secondary">Inactivo</span>{% endif %}</td>
+        <td class="text-end">
+          {% if r.activo %}
+          <form method="post" action="{{ url_for('otro_pago_desactivar', otro_id=r.id) }}"
+                onsubmit="return confirm('Desactivar a {{ r.nombre }}? Ya no se incluira en los proximos lotes.');">
+            <button class="btn btn-sm btn-outline-secondary">Desactivar</button>
+          </form>
+          {% else %}
+          <form method="post" action="{{ url_for('otro_pago_reactivar', otro_id=r.id) }}">
+            <button class="btn btn-sm btn-outline-success">Reactivar</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" class="text-center text-muted py-3">Aun no hay nadie registrado.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <div class="card-header bg-white fw-bold text-navy">Historial de lotes generados</div>
+  <table class="table table-sm mb-0 align-middle">
+    <thead><tr><th>Semana</th><th>Obra donde se incluyo</th><th>Generado por</th><th>Fecha</th><th class="text-end">Registros</th></tr></thead>
+    <tbody>
+      {% for l in lotes %}
+      <tr>
+        <td>{{ l.semana_num }} / {{ l.anio }}</td>
+        <td>{{ l.obra or '-' }}</td>
+        <td>{{ l.generado_por }}</td>
+        <td>{{ l.generado_en }}</td>
+        <td class="text-end">{{ l.num }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="text-center text-muted py-3">Aun no se ha generado ningun lote.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

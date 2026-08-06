@@ -83,6 +83,7 @@
         <a href="{{ url_for('catalogo') }}">Catalogo de sueldos</a>
         {% if current_user.rank >= 100 %}<a href="{{ url_for('usuarios') }}">Usuarios</a>{% endif %}
         {% if current_user.rank >= 100 %}<a href="{{ url_for('parametros') }}">Parametros</a>{% endif %}
+        {% if current_user.rank >= 100 %}<a href="{{ url_for('otros_pagos') }}">Otros pagos semanales</a>{% endif %}
       </div>
 
       <div class="text-muted small mt-3 ps-2">Version {{ APP_VERSION }}</div>
