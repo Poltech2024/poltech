@@ -29,7 +29,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.environ.get("DB_PATH", os.path.join(APP_DIR, "poltech.db"))
 
-APP_VERSION = "1.24"   # version del sistema (visible en el menu)
+APP_VERSION = "1.25"   # version del sistema (visible en el menu)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-cambia-esta-clave-en-render")
@@ -3387,6 +3387,95 @@ def bajas_excel():
     buf = io.BytesIO(); wb.save(buf); buf.seek(0)
     return send_file(buf, as_attachment=True, download_name="Reporte_bajas.xlsx",
                      mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
+# ---------------------------------------------------------------------------
+# Reportes
+# ---------------------------------------------------------------------------
+def problemas_empleado(db, emp):
+    """Revisa un registro de empleado (Row con columnas de empleados) y devuelve
+    una lista de textos describiendo inconsistencias en su informacion."""
+    problemas = []
+    curp = (emp["curp"] or "").strip().upper()
+    if not curp_valida(curp):
+        problemas.append("CURP con formato invalido o faltante.")
+    else:
+        problemas.extend(revisar_curp(curp, emp["nombre"], emp["primer_apellido"],
+                                       emp["segundo_apellido"], emp["sexo"], emp["fecha_nacimiento"]))
+
+    if emp["exime_docs"]:
+        if not (emp["autoriza_tercero"] or "").strip():
+            problemas.append("Documentos eximidos sin indicar quien autorizo.")
+    elif emp["nss_generico"]:
+        if not (emp["autoriza_nss_generico"] or "").strip():
+            problemas.append("NSS generico de pensionado sin autorizacion registrada.")
+    else:
+        nss = (emp["nss"] or "").strip()
+        if not nss:
+            problemas.append("Falta el NSS.")
+        elif not nss_valido(nss):
+            problemas.append("El NSS no pasa la validacion del digito verificador.")
+
+    if not (emp["rfc"] or "").strip():
+        problemas.append("Falta el RFC.")
+    if not (emp["fecha_nacimiento"] or "").strip():
+        problemas.append("Falta la fecha de nacimiento.")
+
+    if not emp["exime_docs"]:
+        tiene_cuenta = db.execute(
+            "SELECT 1 FROM cuentas_bancarias WHERE empleado_id=?", (emp["id"],)).fetchone()
+        if not tiene_cuenta:
+            problemas.append("Sin cuenta bancaria registrada.")
+
+    texto, clase = dias_para_retencion(emp)
+    if clase == "danger":
+        problemas.append("Documentos retenidos: pasaron mas de 15 dias sin completarse.")
+
+    return problemas
+
+
+@app.route("/reportes/calidad-datos")
+@min_rank(GERENTE_RANK)
+def reporte_calidad_datos():
+    db = get_db()
+    f_obra = request.args.get("obra", "").strip()
+    f_clasif = request.args.get("clasificacion", "").strip()
+
+    sql = ("SELECT e.*, p.nombre AS puesto, p.clasificacion, o.nombre AS obra "
+           "FROM empleados e "
+           "LEFT JOIN puestos p ON p.id=e.puesto_id "
+           "LEFT JOIN obras o ON o.id=p.obra_id "
+           "WHERE e.estatus='activo'")
+    args = []
+    if f_obra:
+        sql += " AND o.nombre = ?"; args.append(f_obra)
+    if f_clasif:
+        sql += " AND p.clasificacion = ?"; args.append(f_clasif)
+    vis = obras_del_usuario(db)
+    if vis is not None:
+        if vis:
+            ph = ",".join("?" * len(vis))
+            sql += f" AND o.id IN ({ph})"; args += vis
+        else:
+            sql += " AND 1=0"
+    sql += " ORDER BY o.nombre, e.primer_apellido, e.nombre"
+
+    total = 0
+    filas = []
+    for e in db.execute(sql, args).fetchall():
+        total += 1
+        problemas = problemas_empleado(db, e)
+        if problemas:
+            d = dict(e)
+            d["problemas"] = problemas
+            filas.append(d)
+
+    obras = db.execute("SELECT DISTINCT nombre FROM obras ORDER BY nombre").fetchall()
+    clasificaciones = [r["nombre"] for r in
+                        db.execute("SELECT nombre FROM clasificaciones ORDER BY nombre").fetchall()]
+    return render_template("reporte_calidad_datos.html", filas=filas, total=total,
+                           obras=obras, clasificaciones=clasificaciones,
+                           filtros={"obra": f_obra, "clasificacion": f_clasif})
 
 
 # ---------------------------------------------------------------------------

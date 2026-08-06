@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Calidad de datos - Nomina Poltech{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 no-print">
+  <h3 class="mb-0">Reportes &middot; Calidad de datos</h3>
+  <button class="btn btn-outline-primary" onclick="window.print()">Imprimir</button>
+</div>
+
+<div class="card mb-3 no-print">
+  <form method="get" class="card-body row g-2 align-items-end">
+    <div class="col-md-4">
+      <label class="form-label small mb-1">Obra</label>
+      <select name="obra" class="form-select">
+        <option value="">Todas</option>
+        {% for o in obras %}<option {{ 'selected' if filtros.obra==o.nombre }}>{{ o.nombre }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="col-md-4">
+      <label class="form-label small mb-1">Categoria</label>
+      <select name="clasificacion" class="form-select">
+        <option value="">Todas</option>
+        {% for c in clasificaciones %}<option {{ 'selected' if filtros.clasificacion==c }}>{{ c }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="col-md-2 d-flex gap-2">
+      <button class="btn btn-primary">Filtrar</button>
+      <a class="btn btn-outline-secondary" href="{{ url_for('reporte_calidad_datos') }}">Limpiar</a>
+    </div>
+  </form>
+</div>
+
+<p class="text-muted small">
+  {{ filas|length }} de {{ total }} empleados activos tienen alguna observacion en su informacion
+  (solo se muestran los que tienen algo pendiente).
+</p>
+
+<div class="card">
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead>
+        <tr><th>Cedula</th><th>Trabajador</th><th>Obra</th><th>Puesto</th><th>Observaciones</th></tr>
+      </thead>
+      <tbody>
+        {% for e in filas %}
+        <tr>
+          <td><b>{{ e.cedula or '-' }}</b></td>
+          <td>{{ e.primer_apellido }} {{ e.segundo_apellido or '' }} {{ e.nombre }}</td>
+          <td class="small">{{ e.obra or '-' }}</td>
+          <td class="small">{{ e.puesto or '-' }}</td>
+          <td>
+            {% for p in e.problemas %}
+            <span class="badge text-bg-warning text-dark d-block text-start mb-1">{{ p }}</span>
+            {% endfor %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="text-center text-muted py-4">
+          Sin observaciones: toda la informacion de los empleados filtrados esta completa.
+        </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<style>
+@media print {
+  .no-print, .sidebar, .navbar, .brand-bar { display: none !important; }
+  .col-lg-10 { width: 100% !important; flex: 0 0 100% !important; max-width: 100% !important; }
+}
+</style>
+{% endblock %}
