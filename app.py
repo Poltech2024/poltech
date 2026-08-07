@@ -14,6 +14,7 @@ import io
 import json
 import uuid
 import sqlite3
+import calendar
 import smtplib
 import urllib.request
 import urllib.error
@@ -32,7 +33,7 @@ DB_PATH = os.environ.get("DB_PATH", os.path.join(APP_DIR, "poltech.db"))
 EQUIPO_DOCS_DIR = os.environ.get("EQUIPO_DOCS_DIR", os.path.join(os.path.dirname(DB_PATH), "equipo_docs"))
 os.makedirs(EQUIPO_DOCS_DIR, exist_ok=True)
 
-APP_VERSION = "1.47"   # version del sistema (visible en el menu)
+APP_VERSION = "1.48"   # version del sistema (visible en el menu)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-cambia-esta-clave-en-render")
@@ -553,6 +554,19 @@ CREATE TABLE IF NOT EXISTS contratos (
     contenido BLOB,
     FOREIGN KEY (empleado_id) REFERENCES empleados(id)
 );
+CREATE TABLE IF NOT EXISTS bajadas_historico (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    empleado_id INTEGER NOT NULL,
+    nomina_id INTEGER,
+    fecha_inicio TEXT NOT NULL,
+    dias_tomados REAL NOT NULL DEFAULT 0,
+    dias_excedente REAL NOT NULL DEFAULT 0,
+    descuento_pendiente REAL NOT NULL DEFAULT 0,
+    descuento_aplicado_en INTEGER,
+    pasaje2_aplicado_en INTEGER,
+    registrado_en TEXT,
+    FOREIGN KEY (empleado_id) REFERENCES empleados(id)
+);
 """
 
 def get_db():
@@ -620,6 +634,12 @@ def init_db():
         db.execute("ALTER TABLE nomina_detalle ADD COLUMN bono REAL DEFAULT 0")
     except sqlite3.OperationalError:
         pass
+    for col, tipo in (("bajada_dias", "REAL DEFAULT 0"), ("bajada_excedente", "REAL DEFAULT 0"),
+                      ("bajada_descuento", "REAL DEFAULT 0"), ("bajada_apoyo", "REAL DEFAULT 0")):
+        try:
+            db.execute(f"ALTER TABLE nomina_detalle ADD COLUMN {col} {tipo}")
+        except sqlite3.OperationalError:
+            pass
     for col, tipo in (("extra_pago", "REAL DEFAULT 0"), ("extra_motivo", "TEXT")):
         try:
             db.execute(f"ALTER TABLE nomina_detalle ADD COLUMN {col} {tipo}")
@@ -985,6 +1005,45 @@ def vacaciones_resumen(db, emp):
     return {"periodos": periodos, "total_derecho": total_derecho,
             "total_tomado": tomados_total, "total_disponible": total_derecho - tomados_total,
             "ajuste": ajuste, "autorizadas": autorizadas}
+
+
+# ---------------------------------------------------------------------------
+# Bajadas a casa: permiso de 3 dias cada 3 meses (renovado desde la ultima
+# bajada tomada, o desde que el trabajador cumple 3 meses de antiguedad si
+# es la primera). El excedente de dias se descuenta a $500/dia en la
+# siguiente nomina; el apoyo de pasajes ($1500 + $1500) se da siempre.
+# ---------------------------------------------------------------------------
+BAJADA_DIAS_PERMITIDOS = 3
+BAJADA_DESCUENTO_POR_DIA = 500.0
+BAJADA_APOYO_PASAJE = 1500.0
+
+def _sumar_meses(d, meses):
+    m = d.month - 1 + meses
+    y = d.year + m // 12
+    m = m % 12 + 1
+    dia = min(d.day, calendar.monthrange(y, m)[1])
+    return date(y, m, dia)
+
+
+def bajada_dias_derecho(db, empleado_id, fecha_alta, viernes):
+    """Dias de bajada con derecho (sin generar descuento) en la ventana actual.
+    La ventana se renueva 3 meses despues de la ultima bajada tomada; si nunca
+    ha tomado una, se renueva 3 meses despues de su fecha de alta."""
+    ultima = db.execute(
+        "SELECT fecha_inicio FROM bajadas_historico WHERE empleado_id=? "
+        "ORDER BY fecha_inicio DESC LIMIT 1", (empleado_id,)).fetchone()
+    if ultima:
+        try:
+            ref = date.fromisoformat(str(ultima["fecha_inicio"])[:10])
+        except (TypeError, ValueError):
+            return 0
+    else:
+        try:
+            ref = date.fromisoformat(str(fecha_alta)[:10])
+        except (TypeError, ValueError):
+            return 0
+    proximo_derecho = _sumar_meses(ref, 3)
+    return BAJADA_DIAS_PERMITIDOS if viernes >= proximo_derecho else 0
 
 
 # ---------------------------------------------------------------------------
@@ -3936,6 +3995,36 @@ def vacaciones():
     return render_template("vacaciones_dashboard.html", filas=filas, obras=obras, f_obra=f_obra)
 
 
+# ---------------------------------------------------------------------------
+# Bajadas a casa: control de permisos, excedentes y apoyos de pasaje
+# ---------------------------------------------------------------------------
+@app.route("/bajadas")
+@login_required
+def bajadas_casa():
+    db = get_db()
+    f_obra = request.args.get("obra_id", "").strip()
+    sql = ("SELECT b.*, e.cedula, e.nombre, e.primer_apellido, e.segundo_apellido, "
+           "o.id AS obra_id, o.nombre AS obra "
+           "FROM bajadas_historico b "
+           "JOIN empleados e ON e.id=b.empleado_id "
+           "LEFT JOIN puestos p ON p.id=e.puesto_id LEFT JOIN obras o ON o.id=p.obra_id "
+           "WHERE 1=1")
+    args = []
+    if f_obra:
+        sql += " AND o.id=?"; args.append(int(f_obra))
+    vis = obras_del_usuario(db)
+    if vis is not None:
+        if vis:
+            ph = ",".join("?" * len(vis))
+            sql += f" AND o.id IN ({ph})"; args += vis
+        else:
+            sql += " AND 1=0"
+    sql += " ORDER BY b.fecha_inicio DESC"
+    filas = db.execute(sql, args).fetchall()
+    obras = obras_visibles(db)
+    return render_template("bajadas_dashboard.html", filas=filas, obras=obras, f_obra=f_obra)
+
+
 @app.route("/personal/<int:emp_id>/vacaciones", methods=["GET", "POST"])
 @login_required
 def personal_vacaciones(emp_id):
@@ -4952,9 +5041,15 @@ def asistencia_plantilla():
         ("2. Completa el encabezado (celdas amarillas): Gerente de obra y Fecha de captura.", False),
         ("3. BLOQUE ASISTENCIA: en cada dia escribe el codigo", False),
         ("     A = Asistio     F = Falta     R = Retardo     V = Vacaciones     D = Descanso", False),
+        ("     B = Bajada a casa (sin goce de sueldo; permiso de 3 dias cada 3 meses, ver abajo)", False),
         ("   Cada dia trae su fecha (VIE 24/07, etc.). El DOMINGO no cuenta para la base de 6 dias.", False),
         ("4. DIAS, FALTAS, RET. y VAC. se calculan solos. No los edites.", False),
-        ("   DIAS pagables = dias con A, R o V (el retardo y la vacacion cuentan como dia).", False),
+        ("   DIAS pagables = dias con A, R o V (el retardo y la vacacion cuentan como dia; la", False),
+        ("   bajada a casa (B) NO cuenta como dia pagable).", False),
+        ("   BAJADA A CASA: cada 3 meses tiene derecho a 3 dias (sin goce de sueldo) para ir a su", False),
+        ("   casa. Si toma mas de 3 dias, el excedente se descuenta a $500/dia en su SIGUIENTE nomina", False),
+        ("   (automatico). El apoyo de pasajes ($1500 la semana que regresa + $1500 la siguiente) se", False),
+        ("   paga solo, sin necesidad de capturarlo aqui.", False),
         ("5. BLOQUE HORAS EXTRAS: escribe las horas por dia. TOTAL se suma solo.", False),
         ("   TIPO = 'Factor' (1.5 o 2 veces el sueldo por hora) o 'Precio' (precio por hora pactado).", False),
         ("   VALOR = el factor (1.5 / 2) o el precio por hora en pesos.", False),
@@ -5053,6 +5148,44 @@ def calcular_nomina(db, obra_id, ws, jornada, aplicar_retardos, viernes=None):
 
         dias_pagables = dias_A + dias_R + dias_V
         dias_presente = dias_A + dias_R
+        dias_B = codigos.count("B")
+
+        # --- Bajadas a casa: resolver pendientes de una bajada anterior y, si esta
+        # semana se marco una bajada nueva, calcular su excedente (permiso 3 dias
+        # cada 3 meses; el excedente se descuenta hasta la SIGUIENTE nomina). ---
+        bajada_descuento = 0.0
+        bajada_apoyo = 0.0
+        bajada_desc_pend_id = None
+        bajada_pasaje2_pend_id = None
+        bajada_nueva = None
+        pend_desc = db.execute(
+            "SELECT id, descuento_pendiente FROM bajadas_historico WHERE empleado_id=? "
+            "AND descuento_pendiente>0 AND descuento_aplicado_en IS NULL "
+            "ORDER BY fecha_inicio LIMIT 1", (emp["id"],)).fetchone()
+        if pend_desc:
+            bajada_descuento = _num(pend_desc["descuento_pendiente"])
+            bajada_desc_pend_id = pend_desc["id"]
+        pend_pasaje2 = db.execute(
+            "SELECT id FROM bajadas_historico WHERE empleado_id=? "
+            "AND pasaje2_aplicado_en IS NULL ORDER BY fecha_inicio LIMIT 1", (emp["id"],)).fetchone()
+        if pend_pasaje2:
+            bajada_apoyo += BAJADA_APOYO_PASAJE
+            bajada_pasaje2_pend_id = pend_pasaje2["id"]
+        dias_B_excedente = 0
+        if dias_B:
+            derecho = bajada_dias_derecho(db, emp["id"], emp["fecha_alta"], viernes)
+            dias_B_excedente = max(0, dias_B - derecho)
+            bajada_apoyo += BAJADA_APOYO_PASAJE   # apoyo de pasajes de la semana en que regresa
+            bajada_nueva = {
+                "fecha_inicio": viernes.isoformat(), "dias_tomados": dias_B,
+                "dias_excedente": dias_B_excedente,
+                "descuento_pendiente": round(dias_B_excedente * BAJADA_DESCUENTO_POR_DIA, 2),
+            }
+            if dias_B_excedente:
+                errores.append(
+                    f"Cedula '{cedula}' ({nombre}): tomo {dias_B} dia(s) de bajada a casa, "
+                    f"{dias_B_excedente} mas de los {BAJADA_DIAS_PERMITIDOS} permitidos; se descontaran "
+                    f"${dias_B_excedente * BAJADA_DESCUENTO_POR_DIA:.2f} en su siguiente nomina.")
 
         he_horas = sum(_num(ws.cell(r, c).value) for c in range(18, 25))   # R-X
         tipo = (str(ws.cell(r, 26).value or "").strip().lower())
@@ -5096,8 +5229,8 @@ def calcular_nomina(db, obra_id, ws, jornada, aplicar_retardos, viernes=None):
         desc_retardos = 0.0
         if aplicar_retardos and retardos >= 3:
             desc_retardos = round((int(retardos) // 3) * sueldo_diario, 2)
-        neto = round(sueldo + viaticos + bono + he_importe + extra_pago
-                     - infonavit - desc_nomina - desc_otra - desc_retardos, 2)
+        neto = round(sueldo + viaticos + bono + he_importe + extra_pago + bajada_apoyo
+                     - infonavit - desc_nomina - desc_otra - desc_retardos - bajada_descuento, 2)
 
         nom_full = " ".join(x for x in [emp["nombre"], emp["primer_apellido"], emp["segundo_apellido"]] if x)
         detalles.append({
@@ -5109,7 +5242,12 @@ def calcular_nomina(db, obra_id, ws, jornada, aplicar_retardos, viernes=None):
             "viaticos": viaticos, "bono": bono, "he_horas": he_horas, "he_importe": he_importe,
             "infonavit": infonavit, "desc_nomina": desc_nomina, "desc_otra": desc_otra,
             "desc_retardos": desc_retardos, "extra_pago": extra_pago, "extra_motivo": extra_motivo,
+            "bajada_dias": dias_B, "bajada_excedente": dias_B_excedente,
+            "bajada_descuento": bajada_descuento, "bajada_apoyo": bajada_apoyo,
             "neto": neto, "baja_fecha": baja_fecha, "nota": obs,
+            "_bajada_desc_pend_id": bajada_desc_pend_id,
+            "_bajada_pasaje2_pend_id": bajada_pasaje2_pend_id,
+            "_bajada_nueva": bajada_nueva,
         })
         if baja_fecha:
             avisos_baja.append({
@@ -5171,13 +5309,32 @@ def nomina():
                 "INSERT INTO nomina_detalle(nomina_id, empleado_id, cedula, nombre, clasificacion, "
                 "sueldo_contratado, viaticos_contratado, dias, faltas, "
                 "retardos, vacaciones, sueldo, viaticos, bono, he_horas, he_importe, infonavit, "
-                "desc_nomina, desc_otra, desc_retardos, extra_pago, extra_motivo, neto, baja_fecha, nota) "
-                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "desc_nomina, desc_otra, desc_retardos, extra_pago, extra_motivo, "
+                "bajada_dias, bajada_excedente, bajada_descuento, bajada_apoyo, neto, baja_fecha, nota) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (nomina_id, d["empleado_id"], d["cedula"], d["nombre"], d["clasificacion"],
                  d["sueldo_contratado"], d["viaticos_contratado"], d["dias"], d["faltas"],
                  d["retardos"], d["vacaciones"], d["sueldo"], d["viaticos"], d["bono"], d["he_horas"],
                  d["he_importe"], d["infonavit"], d["desc_nomina"], d["desc_otra"],
-                 d["desc_retardos"], d["extra_pago"], d["extra_motivo"], d["neto"], d["baja_fecha"], d["nota"]))
+                 d["desc_retardos"], d["extra_pago"], d["extra_motivo"],
+                 d["bajada_dias"], d["bajada_excedente"], d["bajada_descuento"], d["bajada_apoyo"],
+                 d["neto"], d["baja_fecha"], d["nota"]))
+            # --- Bajadas a casa: aplicar los pendientes de esta fila y/o registrar
+            # una bajada nueva, ahora que ya existe el nomina_id. ---
+            if d["_bajada_desc_pend_id"]:
+                db.execute("UPDATE bajadas_historico SET descuento_aplicado_en=? WHERE id=?",
+                           (nomina_id, d["_bajada_desc_pend_id"]))
+            if d["_bajada_pasaje2_pend_id"]:
+                db.execute("UPDATE bajadas_historico SET pasaje2_aplicado_en=? WHERE id=?",
+                           (nomina_id, d["_bajada_pasaje2_pend_id"]))
+            if d["_bajada_nueva"]:
+                nb = d["_bajada_nueva"]
+                db.execute(
+                    "INSERT INTO bajadas_historico(empleado_id, nomina_id, fecha_inicio, dias_tomados, "
+                    "dias_excedente, descuento_pendiente, registrado_en) VALUES(?,?,?,?,?,?,?)",
+                    (d["empleado_id"], nomina_id, nb["fecha_inicio"], nb["dias_tomados"],
+                     nb["dias_excedente"], nb["descuento_pendiente"],
+                     datetime.now().isoformat(timespec="seconds")))
         # marcar bajas reportadas
         for b in avisos_baja:
             db.execute("UPDATE empleados SET estatus='baja', fecha_baja=COALESCE(fecha_baja, ?) WHERE id=?",
@@ -5271,7 +5428,7 @@ def nomina_resultado(nomina_id):
     grupos = _agrupar_por_clasificacion(det)
     tot = {k: sum(_num(d.get(k)) for d in det) for k in
            ("sueldo", "viaticos", "bono", "he_importe", "infonavit", "desc_nomina",
-            "desc_otra", "desc_retardos", "extra_pago", "neto")}
+            "desc_otra", "desc_retardos", "extra_pago", "bajada_descuento", "bajada_apoyo", "neto")}
     bajas = [d for d in det if d["baja_fecha"]]
     # totales por clasificacion (cuanto se paga de cada grupo)
     por_clasif = {}
@@ -5287,8 +5444,9 @@ def nomina_resultado(nomina_id):
             "se_queda": 0.0, "traspaso": 0.0, "neto": 0.0, "sale": 0.0}
     for d in det:
         devengado = (_num(d["sueldo"]) + _num(d["viaticos"]) + _num(d.get("bono"))
-                     + _num(d["he_importe"]) + _num(d.get("extra_pago")))
-        se_queda = _num(d["infonavit"]) + _num(d["desc_nomina"]) + _num(d["desc_retardos"])
+                     + _num(d["he_importe"]) + _num(d.get("extra_pago")) + _num(d.get("bajada_apoyo")))
+        se_queda = (_num(d["infonavit"]) + _num(d["desc_nomina"]) + _num(d["desc_retardos"])
+                    + _num(d.get("bajada_descuento")))
         traspaso = _num(d["desc_otra"])
         neto = _num(d["neto"])
         sale = round(neto + traspaso, 2)
@@ -5361,6 +5519,15 @@ def nomina_eliminar(nomina_id):
                                f"vuelve a activo; su baja del {d['baja_fecha']} se habia registrado "
                                f"al calcular la nomina {nomina_id} que se esta eliminando.")
             revertidos.append(f"{emp['nombre']} {emp['primer_apellido']}")
+    # Revertir efectos de "bajadas a casa" que esta nomina haya generado: la bajada
+    # nueva que se hubiera registrado aqui se borra por completo, y cualquier
+    # descuento/apoyo de pasajes que se le haya aplicado a alguien EN esta nomina
+    # (porque venia pendiente de una bajada anterior) se regresa a pendiente.
+    db.execute("DELETE FROM bajadas_historico WHERE nomina_id=?", (nomina_id,))
+    db.execute("UPDATE bajadas_historico SET descuento_aplicado_en=NULL WHERE descuento_aplicado_en=?",
+               (nomina_id,))
+    db.execute("UPDATE bajadas_historico SET pasaje2_aplicado_en=NULL WHERE pasaje2_aplicado_en=?",
+               (nomina_id,))
     db.execute("DELETE FROM nomina_detalle WHERE nomina_id=?", (nomina_id,))
     db.execute("DELETE FROM nominas WHERE id=?", (nomina_id,))
     registrar_bitacora(db, "Eliminacion de nomina",
@@ -5467,7 +5634,8 @@ def nomina_excel(nomina_id):
            "DESC. OTRA", "DESC. RET.", "NETO A PAGAR", "BAJA",
            "TIPO CUENTA", "BANCO", "No. CUENTA", "CLASIFICACION",
            "SUELDO CONTRATADO", "VIATICOS CONTRATADO", "DEPOSITO A (obs)", "BONO",
-           "PAGO EXTRA", "MOTIVO PAGO EXTRA"]
+           "PAGO EXTRA", "MOTIVO PAGO EXTRA",
+           "BAJADA (DIAS)", "BAJADA EXCEDENTE", "APOYO PASAJE", "DESC. BAJADA"]
     HROW = 4
     for i, t in enumerate(cab, start=1):
         c = ws.cell(HROW, i, t)
@@ -5494,7 +5662,9 @@ def nomina_excel(nomina_id):
                        d["neto"], d["baja_fecha"] or "", tipo_cta, banco_cta, num_cta,
                        d["clasificacion"] or "Sin clasificar",
                        _num(d["sueldo_contratado"]), _num(d["viaticos_contratado"]), d["nota"] or "",
-                       _num(d["bono"]), _num(d.get("extra_pago")), d.get("extra_motivo") or ""])
+                       _num(d["bono"]), _num(d.get("extra_pago")), d.get("extra_motivo") or "",
+                       _num(d.get("bajada_dias")), _num(d.get("bajada_excedente")),
+                       _num(d.get("bajada_apoyo")), _num(d.get("bajada_descuento"))])
             ws.cell(r, 20).number_format = "@"   # No. de cuenta como texto
             r += 1
             idx += 1
@@ -5504,11 +5674,12 @@ def nomina_excel(nomina_id):
     fila_tot[cab.index("NOMBRE")] = "TOTALES"
     totales_cols = {"SUELDO": "sueldo", "VIATICOS": "viaticos", "IMPORTE HORAS EXTRAS": "he_importe",
                     "INFONAVIT": "infonavit", "DESC. NOMINA": "desc_nomina", "DESC. OTRA": "desc_otra",
-                    "DESC. RET.": "desc_retardos", "PAGO EXTRA": "extra_pago", "NETO A PAGAR": "neto"}
+                    "DESC. RET.": "desc_retardos", "PAGO EXTRA": "extra_pago", "NETO A PAGAR": "neto",
+                    "APOYO PASAJE": "bajada_apoyo", "DESC. BAJADA": "bajada_descuento"}
     for header, key in totales_cols.items():
         fila_tot[cab.index(header)] = round(sum(_num(d.get(key)) for d in det), 2)
     ws.append(fila_tot)
-    for col in list(range(8, 17)) + [22, 23, 25, 26]:
+    for col in list(range(8, 17)) + [22, 23, 25, 26, cab.index("APOYO PASAJE") + 1, cab.index("DESC. BAJADA") + 1]:
         for row in range(HROW + 1, r + 2):
             cell = ws.cell(row, col)
             if isinstance(cell.value, (int, float)):

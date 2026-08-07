@@ -104,15 +104,17 @@
           <th class="text-end">Sueldo</th><th class="text-end">Viaticos</th><th class="text-end">Bono</th>
           <th>Horas extra</th><th class="text-end">Importe H.E.</th>
           <th class="text-end">Pago extra</th>
+          <th>Bajada (dias)</th><th class="text-end">Apoyo pasaje</th>
           <th class="text-end">INFONAVIT</th><th class="text-end">Desc. nom.</th>
           <th class="text-end">Desc. otra</th><th class="text-end">Desc. ret.</th>
+          <th class="text-end">Desc. bajada</th>
           <th class="text-end">Neto</th>
         </tr>
       </thead>
       <tbody>
         {% for g in grupos %}
         <tr class="table-secondary">
-          <td colspan="18" class="fw-bold text-navy">{{ g.clasificacion }} <span class="fw-normal text-muted">({{ g.filas|length }})</span></td>
+          <td colspan="21" class="fw-bold text-navy">{{ g.clasificacion }} <span class="fw-normal text-muted">({{ g.filas|length }})</span></td>
         </tr>
         {% for d in g.filas %}
         <tr class="{% if d.baja_fecha %}table-warning{% endif %}">
@@ -129,10 +131,13 @@
           <td class="text-center">{{ d.he_horas|round(1) }}</td>
           <td class="text-end">{{ d.he_importe|money }}</td>
           <td class="text-end">{{ d.extra_pago|money }}{% if d.extra_motivo %}<br><span class="small text-primary">&rarr; {{ d.extra_motivo }}</span>{% endif %}</td>
+          <td class="text-center">{{ d.bajada_dias or 0 }}{% if d.bajada_excedente %}<br><span class="small text-danger">{{ d.bajada_excedente }} de mas</span>{% endif %}</td>
+          <td class="text-end">{{ d.bajada_apoyo|money }}</td>
           <td class="text-end">{{ d.infonavit|money }}</td>
           <td class="text-end">{{ d.desc_nomina|money }}</td>
           <td class="text-end">{{ d.desc_otra|money }}{% if d.nota %}<br><span class="small text-primary">&rarr; {{ d.nota }}</span>{% endif %}</td>
           <td class="text-end">{{ d.desc_retardos|money }}</td>
+          <td class="text-end">{{ d.bajada_descuento|money }}</td>
           <td class="text-end fw-bold text-navy">{{ d.neto|money }}</td>
         </tr>
         {% endfor %}
@@ -147,10 +152,13 @@
           <td></td>
           <td class="text-end">{{ tot.he_importe|money }}</td>
           <td class="text-end">{{ tot.extra_pago|money }}</td>
+          <td></td>
+          <td class="text-end">{{ tot.bajada_apoyo|money }}</td>
           <td class="text-end">{{ tot.infonavit|money }}</td>
           <td class="text-end">{{ tot.desc_nomina|money }}</td>
           <td class="text-end">{{ tot.desc_otra|money }}</td>
           <td class="text-end">{{ tot.desc_retardos|money }}</td>
+          <td class="text-end">{{ tot.bajada_descuento|money }}</td>
           <td class="text-end text-navy">{{ tot.neto|money }}</td>
         </tr>
       </tfoot>
@@ -161,6 +169,9 @@
   Sueldo y viaticos = sueldo/viatico diario x dias pagables (A, R, V).
   Horas extra por factor (sueldo/hora x factor) o precio pactado. Jornada base: {{ n.jornada }} horas.
   {% if not n.aplico_retardos %}El descuento por retardos no se aplico en esta nomina.{% endif %}
+  Bajada a casa (codigo B): permiso de 3 dias sin goce de sueldo cada 3 meses; el excedente se
+  descuenta a $500/dia en la siguiente nomina, y el apoyo de pasajes ($1500 + $1500 la semana siguiente)
+  se paga siempre que haya bajada.
 </p>
 
 <div class="card mt-3" style="max-width:480px">

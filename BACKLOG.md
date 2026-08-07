@@ -104,3 +104,9 @@ tambien consultar el peso de cada producto (mismo catalogo, no uno aparte).
 Falta definir en una sesion futura: que productos van en el catalogo (y su peso), quien
 puede solicitar precio (cliente, vendedor, ambos), a quien le llega la solicitud y como
 se autoriza/responde, y si el precio final se conecta con algun reporte o con Embarques.
+
+## Boletos de camion / viaticos de llegada: tope autorizado (pendiente, NUEVA)
+Revisar como se pagan los boletos de camion o viaticos de traslado cuando la gente llega
+a la obra, y poner un monto maximo autorizado para ese pago. Falta definir en una sesion
+futura: cual es el tope (fijo o por obra/distancia), quien lo autoriza, y si se captura
+junto con la asistencia semanal o en otro lugar del sistema.

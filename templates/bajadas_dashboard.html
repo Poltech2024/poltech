@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h3 class="mb-0">Bajadas a casa</h3>
+</div>
+<p class="text-muted small">
+  Historial de bajadas a casa (codigo "B" en la asistencia). Permiso de 3 dias sin goce de sueldo
+  cada 3 meses (renovado desde la ultima bajada tomada). El excedente se descuenta a $500/dia en la
+  siguiente nomina de la persona, y el apoyo de pasajes ($1500 la semana que regresa + $1500 la
+  siguiente) se paga siempre que haya bajada.
+</p>
+
+<form method="get" class="row g-2 mb-3" style="max-width:420px">
+  <div class="col-9">
+    <select name="obra_id" class="form-select form-select-sm" onchange="this.form.submit()">
+      <option value="">Todas las obras</option>
+      {% for o in obras %}<option value="{{ o.id }}" {{ 'selected' if f_obra==o.id|string }}>{{ o.nombre }}</option>{% endfor %}
+    </select>
+  </div>
+</form>
+
+<div class="card">
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead><tr>
+        <th>Cedula</th><th>Trabajador</th><th>Obra</th><th>Semana de bajada</th>
+        <th class="text-end">Dias tomados</th><th class="text-end">Excedente</th>
+        <th class="text-end">Descuento generado</th><th>Estatus descuento</th>
+        <th>Apoyo semana 2</th>
+      </tr></thead>
+      <tbody>
+        {% for f in filas %}
+        <tr>
+          <td><b>{{ f.cedula or '-' }}</b></td>
+          <td>{{ f.nombre }} {{ f.primer_apellido }} {{ f.segundo_apellido or '' }}</td>
+          <td class="small">{{ f.obra or '-' }}</td>
+          <td>{{ f.fecha_inicio }}</td>
+          <td class="text-end">{{ f.dias_tomados }}</td>
+          <td class="text-end">{{ f.dias_excedente }}</td>
+          <td class="text-end">{{ f.descuento_pendiente|money }}</td>
+          <td>
+            {% if f.descuento_pendiente == 0 %}
+            <span class="text-muted small">Sin excedente</span>
+            {% elif f.descuento_aplicado_en %}
+            <span class="badge text-bg-success">Aplicado en nomina #{{ f.descuento_aplicado_en }}</span>
+            {% else %}
+            <span class="badge text-bg-warning text-dark">Pendiente</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if f.pasaje2_aplicado_en %}
+            <span class="badge text-bg-success">Aplicado en nomina #{{ f.pasaje2_aplicado_en }}</span>
+            {% else %}
+            <span class="badge text-bg-warning text-dark">Pendiente</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="9" class="text-center text-muted py-4">No hay bajadas registradas con esos filtros.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
