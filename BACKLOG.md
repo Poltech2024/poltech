@@ -86,6 +86,12 @@ Ademas: si se marcan mas dias "V" de los que le quedan de derecho, el excedente 
 (aviso al calcular la nomina); y hay un ajuste manual (solo administrador) para capturar
 cuantos dias ya tomo un trabajador antiguo antes de usar este sistema.
 
+## Pago de fletes a choferes (pendiente, NUEVA)
+Pago de fletes a los choferes en base a los envios realizados, y generar precios de
+fletes de embarques (area de logistica). Falta definir en una sesion futura como se
+capturan los envios/embarques, quien fija el precio de cada flete, y como se conecta
+con el pago semanal del chofer.
+
 ## Reportes de KPIs por gerencia (pendiente, NUEVA)
 Hacer reportes de indicadores clave (KPIs) por cada una de las gerencias. Falta definir en
 una sesion futura que gerencias son, que KPIs le importan a cada una y de donde salen los

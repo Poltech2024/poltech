@@ -29,7 +29,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.environ.get("DB_PATH", os.path.join(APP_DIR, "poltech.db"))
 
-APP_VERSION = "1.30"   # version del sistema (visible en el menu)
+APP_VERSION = "1.31"   # version del sistema (visible en el menu)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-cambia-esta-clave-en-render")
@@ -2103,6 +2103,131 @@ def puesto_reactivar(puesto_id):
     flash(f"Puesto '{p['nombre']}' reactivado.", "success")
     return redirect(url_for("catalogo"))
 
+
+@app.route("/catalogo/categorias/plantilla")
+@min_rank(GERENTE_RANK)
+def catalogo_categorias_plantilla():
+    """Excel con los trabajadores activos de una obra y su categoria actual, para
+    reasignarles de golpe una nueva categoria (con dropdown de las disponibles)."""
+    db = get_db()
+    obra_id = int(request.args.get("obra_id") or 0)
+    if not obra_id or not puede_ver_obra(db, obra_id):
+        flash("Selecciona una obra valida.", "warning")
+        return redirect(url_for("catalogo"))
+    obra = db.execute("SELECT * FROM obras WHERE id=?", (obra_id,)).fetchone()
+
+    empleados = db.execute(
+        "SELECT DISTINCT e.id, e.cedula, e.nombre, e.primer_apellido, e.segundo_apellido, "
+        "p.nombre AS puesto_actual, p.sueldo_semanal AS sueldo_actual "
+        "FROM empleados e "
+        "JOIN empleado_puestos ep ON ep.empleado_id=e.id AND ep.activo=1 "
+        "JOIN puestos p ON p.id=ep.puesto_id "
+        "WHERE p.obra_id=? AND e.estatus='activo' "
+        "ORDER BY e.primer_apellido, e.nombre", (obra_id,)).fetchall()
+    puestos = db.execute(
+        "SELECT nombre, sueldo_semanal, viaticos_semanales FROM puestos "
+        "WHERE obra_id=? AND activo=1 ORDER BY nombre", (obra_id,)).fetchall()
+
+    from openpyxl.styles import Font, PatternFill
+    from openpyxl.workbook.defined_name import DefinedName
+    from openpyxl.worksheet.datavalidation import DataValidation
+
+    wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Categorias"
+    cab = ["CEDULA", "NOMBRE", "PUESTO ACTUAL", "SUELDO ACTUAL", "PUESTO NUEVO (deja vacio = sin cambio)"]
+    ws.append(cab)
+    for c in ws[1]:
+        c.font = Font(bold=True, color="FFFFFF")
+        c.fill = PatternFill("solid", fgColor="16233C")
+    for e in empleados:
+        nom = " ".join(x for x in [e["nombre"], e["primer_apellido"], e["segundo_apellido"]] if x)
+        ws.append([e["cedula"], nom, e["puesto_actual"], _num(e["sueldo_actual"]), ""])
+    for col, w in zip("ABCDE", (12, 30, 22, 14, 48)):
+        ws.column_dimensions[col].width = w
+
+    opciones = [f"{p['nombre']} (Sueldo {money(p['sueldo_semanal'])}/sem, Viaticos {money(p['viaticos_semanales'])}/sem)"
+                for p in puestos]
+    lst = wb.create_sheet("Listas"); lst.sheet_state = "hidden"
+    for idx, op in enumerate(opciones, start=1):
+        lst.cell(row=idx, column=1, value=op)
+    if opciones:
+        wb.defined_names["ListaCategorias"] = DefinedName(
+            "ListaCategorias", attr_text=f"Listas!$A$1:$A${len(opciones)}")
+        dv = DataValidation(type="list", formula1="ListaCategorias", allow_blank=True, showErrorMessage=False)
+        ws.add_data_validation(dv)
+        dv.add(f"E2:E{len(empleados) + 1}")
+
+    buf = io.BytesIO(); wb.save(buf); buf.seek(0)
+    obra_limpia = re.sub(r"[^0-9A-Za-zÁÉÍÓÚÑáéíóúñ ._-]+", "", obra["nombre"]).strip()
+    return send_file(buf, as_attachment=True, download_name=f"Categorias {obra_limpia}.xlsx",
+                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
+@app.route("/catalogo/categorias/carga", methods=["GET", "POST"])
+@min_rank(GERENTE_RANK)
+def catalogo_categorias_carga():
+    db = get_db()
+    obras = obras_visibles(db)
+    if request.method == "POST":
+        obra_id = int(request.form.get("obra_id") or 0)
+        if not obra_id or not puede_ver_obra(db, obra_id):
+            flash("Selecciona una obra valida.", "warning")
+            return redirect(url_for("catalogo_categorias_carga"))
+        archivo = request.files.get("archivo")
+        if not archivo or not archivo.filename.lower().endswith(".xlsx"):
+            flash("Sube el Excel (.xlsx) que descargaste con la plantilla.", "danger")
+            return redirect(url_for("catalogo_categorias_carga"))
+
+        puestos_obra = {p["nombre"]: p for p in db.execute(
+            "SELECT id, nombre FROM puestos WHERE obra_id=? AND activo=1", (obra_id,)).fetchall()}
+
+        wb = openpyxl.load_workbook(archivo, data_only=True)
+        ws = wb.active
+        cambios = 0
+        errores = []
+        for i, fila in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+            if fila is None or all(c is None or str(c).strip() == "" for c in fila):
+                continue
+            vals = (list(fila) + [None] * 5)[:5]
+            cedula = str(vals[0] or "").strip().upper()
+            nuevo_txt = str(vals[4] or "").strip()
+            if not cedula or not nuevo_txt:
+                continue
+            m = re.match(r"^(.*?)\s*\(Sueldo", nuevo_txt)
+            puesto_nombre = (m.group(1) if m else nuevo_txt).strip()
+            puesto_nuevo = puestos_obra.get(puesto_nombre)
+            if not puesto_nuevo:
+                errores.append(f"Fila {i} ({cedula}): la categoria '{puesto_nombre}' no existe "
+                                "o no esta activa en esta obra.")
+                continue
+            emp = db.execute(
+                "SELECT id, puesto_id FROM empleados WHERE cedula=? AND estatus='activo'",
+                (cedula,)).fetchone()
+            if not emp:
+                errores.append(f"Fila {i}: no existe un trabajador activo con la cedula '{cedula}'.")
+                continue
+            asignacion = db.execute(
+                "SELECT id, puesto_id FROM empleado_puestos WHERE empleado_id=? AND activo=1 "
+                "AND puesto_id IN (SELECT id FROM puestos WHERE obra_id=?)",
+                (emp["id"], obra_id)).fetchone()
+            if not asignacion:
+                errores.append(f"Fila {i} ({cedula}): no tiene una asignacion activa en esta obra.")
+                continue
+            if asignacion["puesto_id"] == puesto_nuevo["id"]:
+                continue
+            db.execute("UPDATE empleado_puestos SET puesto_id=? WHERE id=?",
+                       (puesto_nuevo["id"], asignacion["id"]))
+            if emp["puesto_id"] == asignacion["puesto_id"]:
+                db.execute("UPDATE empleados SET puesto_id=? WHERE id=?", (puesto_nuevo["id"], emp["id"]))
+            registrar_bitacora(db, "Cambio de categoria (carga masiva)",
+                               f"Empleado cedula {cedula}: nueva categoria '{puesto_nombre}'")
+            cambios += 1
+        db.commit()
+        resumen = {"cambios": cambios, "errores": errores}
+        return render_template("catalogo_categorias_carga.html", obras=obras, resumen=resumen)
+
+    return render_template("catalogo_categorias_carga.html", obras=obras, resumen=None)
+
+
 # ---------------------------------------------------------------------------
 # Personal
 # ---------------------------------------------------------------------------
@@ -2316,6 +2441,8 @@ def personal_editar(emp_id):
         return redirect(url_for("personal"))
 
     datos = dict(emp)
+    if datos.get("puesto_id") is not None:
+        datos["puesto_id"] = str(datos["puesto_id"])
     cta = db.execute("SELECT * FROM cuentas_bancarias WHERE empleado_id=?", (emp_id,)).fetchone()
     if cta:
         datos["cta_institucion"] = cta["institucion"]
@@ -4808,10 +4935,22 @@ def nomina_resultado(nomina_id):
         lote_otros_pagos = db.execute(
             "SELECT l.*, o.nombre AS obra FROM otros_pagos_lotes l LEFT JOIN obras o ON o.id=l.obra_id "
             "WHERE l.anio=? AND l.semana_num=?", (n["anio"], n["semana_num"])).fetchone()
+
+    # Activos asignados a esta obra que no aparecieron en esta nomina: revisar si son baja.
+    cedulas_en_nomina = {d["cedula"] for d in det if d["cedula"]}
+    asignados = db.execute(
+        "SELECT DISTINCT e.id, e.cedula, e.nombre, e.primer_apellido, e.segundo_apellido "
+        "FROM empleados e "
+        "JOIN empleado_puestos ep ON ep.empleado_id=e.id AND ep.activo=1 "
+        "JOIN puestos p ON p.id=ep.puesto_id "
+        "WHERE p.obra_id=? AND e.estatus='activo' "
+        "ORDER BY e.primer_apellido, e.nombre", (n["obra_id"],)).fetchall()
+    faltantes = [e for e in asignados if e["cedula"] not in cedulas_en_nomina]
+
     return render_template("nomina_resultado.html", n=n, det=det, tot=tot,
                            bajas=bajas, por_clasif=por_clasif, caja=caja, caja_rows=caja_rows,
                            pct_despacho=pct_despacho, despacho=despacho, total_a_pagar=total_a_pagar,
-                           lote_otros_pagos=lote_otros_pagos)
+                           lote_otros_pagos=lote_otros_pagos, faltantes=faltantes)
 
 
 @app.route("/nomina/<int:nomina_id>/eliminar", methods=["POST"])

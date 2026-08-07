@@ -1,6 +1,12 @@
 {% extends "base.html" %}
 {% block content %}
-<h3 class="mb-3">Catalogo de sueldos por obra</h3>
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h3 class="mb-0">Catalogo de sueldos por obra</h3>
+  {% if current_user.rank >= GERENTE_RANK %}
+  <a class="btn btn-outline-primary" href="{{ url_for('catalogo_categorias_carga') }}">
+    Carga masiva de categorias por obra</a>
+  {% endif %}
+</div>
 {% if current_user.rank >= GERENTE_RANK %}
 <div class="card p-3 mb-4">
   <h6 class="text-navy">Clasificaciones</h6>

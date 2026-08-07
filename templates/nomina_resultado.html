@@ -73,6 +73,23 @@
 </div>
 {% endif %}
 
+{% if faltantes %}
+<div class="alert alert-danger">
+  <b>Trabajadores asignados a esta obra que NO aparecieron en esta nomina ({{ faltantes|length }}):</b>
+  <p class="small mb-2">Siguen activos en el sistema pero no vinieron en el Excel que subiste.
+    Revisa si ya no trabajan aqui — si es asi, dales de baja para que no se les siga contando.</p>
+  <ul class="mb-0">
+    {% for e in faltantes %}
+    <li>{{ e.nombre }} {{ e.primer_apellido }} {{ e.segundo_apellido or '' }} (cedula {{ e.cedula }})
+      {% if current_user.rank >= GERENTE_RANK %}
+      &mdash; <a href="{{ url_for('personal_baja', emp_id=e.id) }}">Dar de baja</a>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
 <div class="card">
   <div class="table-responsive">
     <table class="table table-sm table-hover align-middle mb-0 table-sticky-first" style="font-size:.85rem;">
