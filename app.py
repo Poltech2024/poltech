@@ -33,7 +33,7 @@ DB_PATH = os.environ.get("DB_PATH", os.path.join(APP_DIR, "poltech.db"))
 EQUIPO_DOCS_DIR = os.environ.get("EQUIPO_DOCS_DIR", os.path.join(os.path.dirname(DB_PATH), "equipo_docs"))
 os.makedirs(EQUIPO_DOCS_DIR, exist_ok=True)
 
-APP_VERSION = "1.49"   # version del sistema (visible en el menu)
+APP_VERSION = "1.50"   # version del sistema (visible en el menu)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-cambia-esta-clave-en-render")
@@ -1066,6 +1066,16 @@ def puede_ver_nominas():
 
 def puede_ver_embarques():
     return session.get("role") in ("admin", "gerente_embarques")
+
+def nomina_required(f):
+    @wraps(f)
+    def wrapper(*a, **k):
+        if not session.get("user_id"):
+            return redirect(url_for("login"))
+        if not puede_ver_nominas():
+            abort(403)
+        return f(*a, **k)
+    return wrapper
 
 def embarques_required(f):
     @wraps(f)
@@ -2591,7 +2601,7 @@ def _dashboard_calcular(db, f_obra, f_clasif, f_estatus, f_periodo):
 
 
 @app.route("/nominas")
-@login_required
+@nomina_required
 def dashboard():
     db = get_db()
     f_obra = request.args.get("obra_id", "").strip()
@@ -2603,7 +2613,7 @@ def dashboard():
 
 
 @app.route("/nominas/excel")
-@login_required
+@nomina_required
 def dashboard_excel():
     db = get_db()
     f_obra = request.args.get("obra_id", "").strip()
@@ -5776,12 +5786,20 @@ def nomina():
             db.execute("UPDATE empleado_puestos SET activo=0 WHERE empleado_id=?", (b["empleado_id"],))
             registrar_bitacora(db, "Baja de trabajador",
                                f"{b['nombre']} (cedula {b['cedula']}, NSS {b['nss']}) baja desde {b['baja_fecha']}")
-            send_admin_alert(
+            # Avisar por correo a residentes, superintendentes y administradores de la obra (+ contador)
+            correos_baja = [r["username"] for r in db.execute(
+                "SELECT DISTINCT u.username FROM users u "
+                "LEFT JOIN user_obras uo ON uo.user_id=u.id "
+                "WHERE u.role='admin' OR (u.role IN ('residente','superintendente') AND uo.obra_id=?)",
+                (obra_id,)).fetchall()]
+            correos_baja.append(os.environ.get("ADMIN_EMAIL", ""))
+            correos_baja.append(get_param(db, "email_contador", ""))
+            enviar_correo(
                 "POLTECH - Aviso de baja de trabajador",
                 (f"El trabajador {b['nombre']} causa baja desde {b['baja_fecha']}.\n"
                  f"CURP: {b['curp']}  RFC: {b['rfc']}  NSS: {b['nss']}  Puesto: {b['puesto']}.\n\n"
                  f"Favor de tramitar la baja ante el IMSS."),
-                extra=[get_param(db, "email_contador", "")])
+                correos_baja)
         registrar_bitacora(db, "Calculo de nomina",
                            f"Obra {obra_id}, semana {viernes.isoformat()}, {len(detalles)} trabajadores, total {total:.2f}")
         db.commit()
