@@ -29,7 +29,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.environ.get("DB_PATH", os.path.join(APP_DIR, "poltech.db"))
 
-APP_VERSION = "1.38"   # version del sistema (visible en el menu)
+APP_VERSION = "1.39"   # version del sistema (visible en el menu)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-cambia-esta-clave-en-render")
@@ -4697,10 +4697,10 @@ def asistencia_plantilla():
             ws[vc].fill = PatternFill("solid", fgColor=AMAR)
 
     # Fila 6: titulos de bloque (combinados)
-    ws.merge_cells("D6:O6"); ws["D6"] = "ASISTENCIA"
-    ws.merge_cells("P6:Y6"); ws["P6"] = "HORAS EXTRAS"
-    ws.merge_cells("Z6:AF6"); ws["Z6"] = "RETARDOS"
-    for cc, fill in (("D6", NAVY), ("P6", AZUL), ("Z6", ROJO)):
+    ws.merge_cells("F6:Q6"); ws["F6"] = "ASISTENCIA"
+    ws.merge_cells("R6:AA6"); ws["R6"] = "HORAS EXTRAS"
+    ws.merge_cells("AB6:AH6"); ws["AB6"] = "RETARDOS"
+    for cc, fill in (("F6", NAVY), ("R6", AZUL), ("AB6", ROJO)):
         ws[cc].font = F(bold=True, size=10, color="FFFFFF")
         ws[cc].fill = PatternFill("solid", fgColor=fill)
         ws[cc].alignment = Alignment(horizontal="center", vertical="center")
@@ -4708,15 +4708,15 @@ def asistencia_plantilla():
     # Fila 7: encabezados
     HROW = 7
     cab = ["No.", "CEDULA", "NOMBRE DEL TRABAJADOR"]
-    cab += [f"{etqs[i]}\n{fechas[i]}" for i in range(7)]                 # D-J asistencia
-    cab += ["DIAS", "FALTAS", "RET.", "VAC.", "BAJA\n(Ultimo dia trabajado)\nDD-MM-AAAA"]  # K-O
-    cab += [f"{etqs[i]}\n{fechas[i]}" for i in range(7)]                 # P-V horas extra
-    cab += ["TOTAL\nHORAS EXTRAS", "TIPO", "VALOR"]                      # W-Y
-    cab += [f"{etqs[i]}\n{fechas[i]}" for i in range(7)]                 # Z-AF retardos
-    cab += ["DESCUENTOS\nNOMINA", "DESCUENTOS A\nOTRA CUENTA"]           # AG-AH
-    cab += ["OBSERVACIONES\n(a quien se deposita el desc. a otra cuenta)"]  # AI
-    cab += ["PAGO EXTRA\n(una sola vez)", "MOTIVO DEL\nPAGO EXTRA"]      # AJ-AK
-    cab += ["SUELDO\nREGISTRADO", "VIATICOS\nREGISTRADOS"]               # AL-AM (solo referencia)
+    cab += ["SUELDO\nREGISTRADO", "VIATICOS\nREGISTRADOS"]               # D-E (solo referencia)
+    cab += [f"{etqs[i]}\n{fechas[i]}" for i in range(7)]                 # F-L asistencia
+    cab += ["DIAS", "FALTAS", "RET.", "VAC.", "BAJA\n(Ultimo dia trabajado)\nDD-MM-AAAA"]  # M-Q
+    cab += [f"{etqs[i]}\n{fechas[i]}" for i in range(7)]                 # R-X horas extra
+    cab += ["TOTAL\nHORAS EXTRAS", "TIPO", "VALOR"]                      # Y-AA
+    cab += [f"{etqs[i]}\n{fechas[i]}" for i in range(7)]                 # AB-AH retardos
+    cab += ["DESCUENTOS\nNOMINA", "DESCUENTOS A\nOTRA CUENTA"]           # AI-AJ
+    cab += ["OBSERVACIONES\n(a quien se deposita el desc. a otra cuenta)"]  # AK
+    cab += ["PAGO EXTRA\n(una sola vez)", "MOTIVO DEL\nPAGO EXTRA"]      # AL-AM
     for i, t in enumerate(cab, start=1):
         hdr(ws.cell(HROW, i, t))
 
@@ -4725,48 +4725,48 @@ def asistencia_plantilla():
         ws.cell(r, 1, idx)
         ws.cell(r, 2, emp["cedula"] or "")
         ws.cell(r, 3, nom(emp))
-        # Asistencia (D-J): base=A, domingo(F col6)=D
-        for col in (4, 5, 7, 8, 9, 10):
+        ws.cell(r, 4, _num(emp["sueldo_semanal"]))                                  # SUELDO REGISTRADO (ref)
+        ws.cell(r, 5, _num(emp["viaticos_semanales"]))                              # VIATICOS REGISTRADOS (ref)
+        # Asistencia (F-L): base=A, domingo(H col8)=D
+        for col in (6, 7, 9, 10, 11, 12):
             ws.cell(r, col, "A")
-        ws.cell(r, 6, "D")
+        ws.cell(r, 8, "D")
         # Formulas de conteo
-        ws.cell(r, 11).value = (f'=COUNTIF(D{r}:E{r},"A")+COUNTIF(G{r}:J{r},"A")'
-                                f'+COUNTIF(D{r}:E{r},"R")+COUNTIF(G{r}:J{r},"R")'
-                                f'+COUNTIF(D{r}:E{r},"V")+COUNTIF(G{r}:J{r},"V")')   # DIAS
-        ws.cell(r, 12).value = f'=COUNTIF(D{r}:E{r},"F")+COUNTIF(G{r}:J{r},"F")'     # FALTAS
-        ws.cell(r, 13).value = f'=SUM(Z{r}:AF{r})'                                   # RET.
-        ws.cell(r, 14).value = f'=COUNTIF(D{r}:E{r},"V")+COUNTIF(G{r}:J{r},"V")'     # VAC
-        ws.cell(r, 15, "")                                                          # BAJA
-        # Horas extra (P-V) = 0, TOTAL, TIPO, VALOR
-        for col in range(16, 23):
+        ws.cell(r, 13).value = (f'=COUNTIF(F{r}:G{r},"A")+COUNTIF(I{r}:L{r},"A")'
+                                f'+COUNTIF(F{r}:G{r},"R")+COUNTIF(I{r}:L{r},"R")'
+                                f'+COUNTIF(F{r}:G{r},"V")+COUNTIF(I{r}:L{r},"V")')   # DIAS
+        ws.cell(r, 14).value = f'=COUNTIF(F{r}:G{r},"F")+COUNTIF(I{r}:L{r},"F")'     # FALTAS
+        ws.cell(r, 15).value = f'=SUM(AB{r}:AH{r})'                                  # RET.
+        ws.cell(r, 16).value = f'=COUNTIF(F{r}:G{r},"V")+COUNTIF(I{r}:L{r},"V")'     # VAC
+        ws.cell(r, 17, "")                                                          # BAJA
+        # Horas extra (R-X) = 0, TOTAL, TIPO, VALOR
+        for col in range(18, 25):
             ws.cell(r, col, 0)
-        ws.cell(r, 23).value = f"=SUM(P{r}:V{r})"                                    # TOTAL HE
-        ws.cell(r, 24, "")                                                          # TIPO
-        ws.cell(r, 25, "")                                                          # VALOR
-        # Retardos (Z-AF) = 0
-        for col in range(26, 33):
+        ws.cell(r, 25).value = f"=SUM(R{r}:X{r})"                                    # TOTAL HE
+        ws.cell(r, 26, "")                                                          # TIPO
+        ws.cell(r, 27, "")                                                          # VALOR
+        # Retardos (AB-AH) = 0
+        for col in range(28, 35):
             ws.cell(r, col, 0)
-        ws.cell(r, 33, 0)                                                           # DESC NOMINA
-        ws.cell(r, 34, 0)                                                           # DESC OTRA CUENTA
-        ws.cell(r, 35, "")                                                          # OBSERVACIONES
-        ws.cell(r, 36, 0)                                                           # PAGO EXTRA
-        ws.cell(r, 37, "")                                                          # MOTIVO PAGO EXTRA
-        ws.cell(r, 38, _num(emp["sueldo_semanal"]))                                 # SUELDO REGISTRADO (ref)
-        ws.cell(r, 39, _num(emp["viaticos_semanales"]))                             # VIATICOS REGISTRADOS (ref)
+        ws.cell(r, 35, 0)                                                           # DESC NOMINA
+        ws.cell(r, 36, 0)                                                           # DESC OTRA CUENTA
+        ws.cell(r, 37, "")                                                          # OBSERVACIONES
+        ws.cell(r, 38, 0)                                                           # PAGO EXTRA
+        ws.cell(r, 39, "")                                                          # MOTIVO PAGO EXTRA
         for col in range(1, 40):
             cell = ws.cell(r, col)
             cell.font = F(size=9); cell.border = borde
-            if 4 <= col <= 34 or col == 36: cell.alignment = Alignment(horizontal="center")
-        ws.cell(r, 35).fill = PatternFill("solid", fgColor=AMAR)
-        ws.cell(r, 15).fill = PatternFill("solid", fgColor=AMAR)
-        ws.cell(r, 36).fill = PatternFill("solid", fgColor=AMAR)
+            if col >= 4 and col not in (37, 39): cell.alignment = Alignment(horizontal="center")
         ws.cell(r, 37).fill = PatternFill("solid", fgColor=AMAR)
-        for col in (38, 39):
-            c38 = ws.cell(r, col)
-            c38.fill = PatternFill("solid", fgColor="E9ECEF")
-            c38.number_format = "#,##0.00"
-            c38.font = F(size=9, italic=True, color="6B7280")
-            c38.alignment = Alignment(horizontal="center")
+        ws.cell(r, 17).fill = PatternFill("solid", fgColor=AMAR)
+        ws.cell(r, 38).fill = PatternFill("solid", fgColor=AMAR)
+        ws.cell(r, 39).fill = PatternFill("solid", fgColor=AMAR)
+        for col in (4, 5):
+            cref = ws.cell(r, col)
+            cref.fill = PatternFill("solid", fgColor="E9ECEF")
+            cref.number_format = "#,##0.00"
+            cref.font = F(size=9, italic=True, color="6B7280")
+            cref.alignment = Alignment(horizontal="center")
         r += 1
     ult = r - 1
 
@@ -4777,24 +4777,24 @@ def asistencia_plantilla():
             if prompt: d.prompt = prompt
             if title: d.promptTitle = title
             ws.add_data_validation(d); d.add(rng)
-        dv("list", '"A,F,R,V,D"', f"D{HROW+1}:J{ult}",
+        dv("list", '"A,F,R,V,D"', f"F{HROW+1}:L{ult}",
            "A=Asistio  F=Falta  R=Retardo  V=Vacaciones  D=Descanso", "Asistencia")
-        dv("decimal", "0", f"P{HROW+1}:V{ult}")                 # horas extra
-        dv("list", '"Factor,Precio"', f"X{HROW+1}:X{ult}",
+        dv("decimal", "0", f"R{HROW+1}:X{ult}")                 # horas extra
+        dv("list", '"Factor,Precio"', f"Z{HROW+1}:Z{ult}",
            "Factor = 1.5 o 2 veces el sueldo por hora.  Precio = precio por hora pactado.", "Tipo H.E.")
-        dv("decimal", "0", f"Y{HROW+1}:Y{ult}")                 # valor
-        dv("list", '"0,1"', f"Z{HROW+1}:AF{ult}",
+        dv("decimal", "0", f"AA{HROW+1}:AA{ult}")               # valor
+        dv("list", '"0,1"', f"AB{HROW+1}:AH{ult}",
            "1 = ese dia tuvo retardo.  0 = sin retardo.", "Retardos")
-        dv("custom", "TRUE", f"O{HROW+1}:O{ult}",
+        dv("custom", "TRUE", f"Q{HROW+1}:Q{ult}",
            "Si hay baja, escribe la fecha como DD-MM-AAAA (ej. 15-08-2026).", "Fecha de baja")
-        dv("decimal", "0", f"AG{HROW+1}:AH{ult}")               # descuentos
-        dv("decimal", "0", f"AJ{HROW+1}:AJ{ult}",
+        dv("decimal", "0", f"AI{HROW+1}:AJ{ult}")               # descuentos
+        dv("decimal", "0", f"AL{HROW+1}:AL{ult}",
            "Pago extra de una sola vez (no se repite la siguiente semana).", "Pago extra")
 
-    anchos = ([5, 10, 30] + [6]*7 + [7, 8, 6, 6, 12] + [6]*7 + [9, 9, 8] + [6]*7 + [12, 13, 32, 12, 28, 13, 14])
+    anchos = ([5, 10, 30] + [13, 14] + [6]*7 + [7, 8, 6, 6, 12] + [6]*7 + [9, 9, 8] + [6]*7 + [12, 13, 32, 12, 28])
     for i, w in enumerate(anchos, start=1):
         ws.column_dimensions[L(i)].width = w
-    ws.freeze_panes = "D8"
+    ws.freeze_panes = "F8"
 
     lr = ult + 2
     ws.cell(lr, 3, "Codigos de ASISTENCIA:  A = Asistio    F = Falta    R = Retardo    V = Vacaciones    D = Descanso").font = F(size=9, bold=True, color=NAVY)
@@ -4849,7 +4849,7 @@ def asistencia_plantilla():
         ("   Se autoriza junto con el resto de la nomina al darle 'Autorizar y liberar'.", False),
         ("10. Guarda el archivo y subelo en el sistema (Asistencia semanal > Calcular nomina).", False),
         ("", False),
-        ("SUELDO REGISTRADO y VIATICOS REGISTRADOS (columnas grises al final): son solo para revisar,", False),
+        ("SUELDO REGISTRADO y VIATICOS REGISTRADOS (columnas grises junto al nombre): son solo para revisar,", False),
         ("  muestran lo que cada trabajador tiene dado de alta en el catalogo de sueldos. No se editan;", False),
         ("  la nomina se calcula siempre con lo que este en el catalogo, no con lo que diga aqui.", False),
     ]
@@ -4868,7 +4868,7 @@ def asistencia_plantilla():
 # ---------------------------------------------------------------------------
 # Nomina: subir el Excel de asistencia lleno y calcular
 # ---------------------------------------------------------------------------
-DIAS_BASE_COLS = [4, 5, 7, 8, 9, 10]   # D,E,G,H,I,J (sin domingo=F/col6)
+DIAS_BASE_COLS = [6, 7, 9, 10, 11, 12]   # F,G,I,J,K,L (sin domingo=H/col8)
 
 def _num(v):
     try:
@@ -4933,19 +4933,19 @@ def calcular_nomina(db, obra_id, ws, jornada, aplicar_retardos, viernes=None):
         dias_pagables = dias_A + dias_R + dias_V
         dias_presente = dias_A + dias_R
 
-        he_horas = sum(_num(ws.cell(r, c).value) for c in range(16, 23))   # P-V
-        tipo = (str(ws.cell(r, 24).value or "").strip().lower())
-        valor = _num(ws.cell(r, 25).value)
-        retardos = sum(_num(ws.cell(r, c).value) for c in range(26, 33))   # Z-AF
-        desc_nomina = _num(ws.cell(r, 33).value)
-        desc_otra = _num(ws.cell(r, 34).value)
-        obs = str(ws.cell(r, 35).value or "").strip()   # a quien se deposita el desc. a otra cuenta
-        extra_pago = _num(ws.cell(r, 36).value)
-        extra_motivo = str(ws.cell(r, 37).value or "").strip()
+        he_horas = sum(_num(ws.cell(r, c).value) for c in range(18, 25))   # R-X
+        tipo = (str(ws.cell(r, 26).value or "").strip().lower())
+        valor = _num(ws.cell(r, 27).value)
+        retardos = sum(_num(ws.cell(r, c).value) for c in range(28, 35))   # AB-AH
+        desc_nomina = _num(ws.cell(r, 35).value)
+        desc_otra = _num(ws.cell(r, 36).value)
+        obs = str(ws.cell(r, 37).value or "").strip()   # a quien se deposita el desc. a otra cuenta
+        extra_pago = _num(ws.cell(r, 38).value)
+        extra_motivo = str(ws.cell(r, 39).value or "").strip()
         if extra_pago and not extra_motivo:
             errores.append(f"Cedula '{cedula}' ({nombre}): tiene un pago extra de {extra_pago} "
                             "sin motivo; escribe el motivo en la columna MOTIVO DEL PAGO EXTRA.")
-        baja_fecha = normalizar_fecha(ws.cell(r, 15).value)
+        baja_fecha = normalizar_fecha(ws.cell(r, 17).value)
         if baja_fecha and not fecha_valida(baja_fecha):
             errores.append(
                 f"Cedula '{cedula}' ({nombre}): la fecha de baja '{baja_fecha}' no se "
