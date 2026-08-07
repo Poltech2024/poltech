@@ -29,7 +29,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.environ.get("DB_PATH", os.path.join(APP_DIR, "poltech.db"))
 
-APP_VERSION = "1.31"   # version del sistema (visible en el menu)
+APP_VERSION = "1.32"   # version del sistema (visible en el menu)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-cambia-esta-clave-en-render")
@@ -893,6 +893,22 @@ def curp_fecha(curp):
     except Exception:
         return None
 
+# Nombres de pila que RENAPO/INE "saltan" al generar la CURP: si el primer
+# nombre es uno de estos y hay un segundo nombre, la CURP usa la inicial del
+# SEGUNDO (ej. "Jose Eduardo" -> CURP usa la E de Eduardo, no la J de Jose).
+NOMBRES_COMPUESTOS_CURP = {"MARIA", "MA", "JOSE", "J"}
+
+def iniciales_nombre_validas(nombre):
+    """Iniciales aceptables para la posicion 4 de la CURP (ver NOMBRES_COMPUESTOS_CURP)."""
+    partes = (nombre or "").strip().upper().split()
+    if not partes:
+        return set()
+    iniciales = {partes[0][0]}
+    if partes[0].rstrip(".") in NOMBRES_COMPUESTOS_CURP and len(partes) > 1:
+        iniciales.add(partes[1][0])
+    return iniciales
+
+
 def revisar_curp(curp, nombre, ap1, ap2, sexo, fecha_nac):
     """Devuelve una lista de advertencias (no bloquea)."""
     avisos = []
@@ -906,7 +922,7 @@ def revisar_curp(curp, nombre, ap1, ap2, sexo, fecha_nac):
         avisos.append("La CURP no coincide con la inicial del primer apellido.")
     if ap2 and curp[2] not in (inicial(ap2), "X"):
         avisos.append("La CURP no coincide con la inicial del segundo apellido.")
-    if nombre and curp[3] not in (inicial(nombre), "X"):
+    if nombre and curp[3] not in (iniciales_nombre_validas(nombre) | {"X"}):
         avisos.append("La CURP no coincide con la inicial del nombre.")
     if sexo and curp_sexo(curp) != sexo:
         avisos.append("El sexo no coincide con el que indica la CURP.")
