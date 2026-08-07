@@ -32,7 +32,7 @@ DB_PATH = os.environ.get("DB_PATH", os.path.join(APP_DIR, "poltech.db"))
 EQUIPO_DOCS_DIR = os.environ.get("EQUIPO_DOCS_DIR", os.path.join(os.path.dirname(DB_PATH), "equipo_docs"))
 os.makedirs(EQUIPO_DOCS_DIR, exist_ok=True)
 
-APP_VERSION = "1.41"   # version del sistema (visible en el menu)
+APP_VERSION = "1.42"   # version del sistema (visible en el menu)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-cambia-esta-clave-en-render")
@@ -132,9 +132,21 @@ def siguiente_clave_otro_pago(db):
 def asegurar_puesto_asignado(db, empleado_id, puesto_id):
     """Registra (si no existe) una asignacion activa en empleado_puestos para que
     calcular_nomina y la plantilla de asistencia lo encuentren en esa obra.
-    Se llama cada vez que se crea o cambia el puesto principal de un empleado."""
+    Se llama cada vez que se crea o cambia el puesto principal de un empleado.
+    Antes de activar la nueva, desactiva cualquier otra asignacion activa que el
+    empleado tuviera en la MISMA obra (un empleado no puede tener 2 puestos activos
+    a la vez dentro de una obra; si trabaja en varias obras, cada una conserva su
+    propia asignacion por separado - ver personal_obras). Sin esto, editar el puesto
+    de alguien (o reingresarlo) dejaba la asignacion vieja activa y lo duplicaba en
+    la asistencia/nomina de esa obra."""
     if not puesto_id:
         return
+    obra = db.execute("SELECT obra_id FROM puestos WHERE id=?", (puesto_id,)).fetchone()
+    if obra:
+        db.execute(
+            "UPDATE empleado_puestos SET activo=0 WHERE empleado_id=? AND activo=1 AND puesto_id<>? "
+            "AND puesto_id IN (SELECT id FROM puestos WHERE obra_id=?)",
+            (empleado_id, puesto_id, obra["obra_id"]))
     try:
         db.execute(
             "INSERT INTO empleado_puestos(empleado_id, puesto_id, activo, agregado_en) "
@@ -613,6 +625,13 @@ def init_db():
             db.execute(f"ALTER TABLE nomina_detalle ADD COLUMN {col} {tipo}")
         except sqlite3.OperationalError:
             pass
+    # Migracion suave: tipo/valor sugerido de horas extra por obra (se precarga en la
+    # plantilla de asistencia, el usuario lo puede editar renglon por renglon)
+    for col, tipo in (("he_tipo_sugerido", "TEXT"), ("he_valor_sugerido", "REAL")):
+        try:
+            db.execute(f"ALTER TABLE obras ADD COLUMN {col} {tipo}")
+        except sqlite3.OperationalError:
+            pass
     # Migracion suave: liga entre una unidad de embarques y su equipo (cedula madre)
     try:
         db.execute("ALTER TABLE unidades ADD COLUMN equipo_id INTEGER REFERENCES equipos(id)")
@@ -718,6 +737,35 @@ def init_db():
         for oid, onom in db.execute("SELECT id, nombre FROM obras").fetchall():
             db.execute("UPDATE obras SET nombre=? WHERE id=?", (titulo_obra(onom), oid))
         db.execute("INSERT INTO parametros(clave, valor) VALUES('norm_nombres_hecho','1') "
+                   "ON CONFLICT(clave) DO UPDATE SET valor='1'")
+    # Migracion unica: corrige duplicados de empleado_puestos activos (bug: editar el
+    # puesto de un empleado, o reingresarlo, dejaba activa tambien la asignacion
+    # anterior en esa misma obra en vez de reemplazarla -> el empleado aparecia 2
+    # veces en la asistencia/nomina de esa obra). Ver asegurar_puesto_asignado().
+    if _param_actual("fix_puestos_duplicados_hecho") != "1":
+        # 1) Un trabajador dado de baja no debe conservar asignaciones activas.
+        db.execute(
+            "UPDATE empleado_puestos SET activo=0 WHERE activo=1 AND empleado_id IN "
+            "(SELECT id FROM empleados WHERE estatus<>'activo')")
+        # 2) Dos o mas asignaciones activas del mismo empleado en la MISMA obra:
+        #    se conserva la que coincide con el puesto principal actual (empleados.puesto_id),
+        #    o si ninguna coincide, la mas reciente; el resto se desactiva.
+        grupos = db.execute(
+            "SELECT ep.empleado_id, GROUP_CONCAT(ep.id) FROM empleado_puestos ep "
+            "JOIN puestos p ON p.id=ep.puesto_id WHERE ep.activo=1 "
+            "GROUP BY ep.empleado_id, p.obra_id HAVING COUNT(*) > 1").fetchall()
+        for emp_id, ids_txt in grupos:
+            ids = [int(x) for x in ids_txt.split(",")]
+            fila_emp = db.execute("SELECT puesto_id FROM empleados WHERE id=?", (emp_id,)).fetchone()
+            puesto_actual = fila_emp[0] if fila_emp else None
+            filas = db.execute(
+                f"SELECT id, puesto_id FROM empleado_puestos WHERE id IN "
+                f"({','.join('?' * len(ids))})", ids).fetchall()
+            mantener = next((fid for fid, fpid in filas if fpid == puesto_actual), max(ids))
+            for i in ids:
+                if i != mantener:
+                    db.execute("UPDATE empleado_puestos SET activo=0 WHERE id=?", (i,))
+        db.execute("INSERT INTO parametros(clave, valor) VALUES('fix_puestos_duplicados_hecho','1') "
                    "ON CONFLICT(clave) DO UPDATE SET valor='1'")
     db.commit()
     db.close()
@@ -2190,12 +2238,17 @@ def obra_editar(obra_id):
     if not puede_ver_obra(db, obra_id):
         abort(403)
     if request.method == "POST":
+        he_tipo = request.form.get("he_tipo_sugerido", "").strip()
+        if he_tipo not in ("Factor", "Precio"):
+            he_tipo = None
+        he_valor = float(request.form.get("he_valor_sugerido") or 0) or None
         db.execute(
-            "UPDATE obras SET proyecto=?, contrato=?, nombre=?, estado=? WHERE id=?",
+            "UPDATE obras SET proyecto=?, contrato=?, nombre=?, estado=?, "
+            "he_tipo_sugerido=?, he_valor_sugerido=? WHERE id=?",
             (request.form.get("proyecto", "").strip(),
              request.form.get("contrato", "").strip(),
              request.form.get("nombre", "").strip() or obra["nombre"],
-             request.form.get("estado", ""), obra_id))
+             request.form.get("estado", ""), he_tipo, he_valor, obra_id))
         db.commit()
         registrar_bitacora(db, "Edicion de obra", f"Obra {obra_id}")
         db.commit()
@@ -3632,6 +3685,7 @@ def personal_baja(emp_id):
             return render_template("personal_baja.html", emp=emp, motivos=MOTIVOS_BAJA)
         db.execute("UPDATE empleados SET estatus='baja', fecha_baja=?, motivo_baja=? WHERE id=?",
                    (fecha, motivo, emp_id))
+        db.execute("UPDATE empleado_puestos SET activo=0 WHERE empleado_id=?", (emp_id,))
         registrar_bitacora(db, "Baja de trabajador",
                            f"{emp['nombre']} {emp['primer_apellido']} (cedula {emp['cedula']}) "
                            f"baja {fecha} - {motivo}")
@@ -4808,8 +4862,8 @@ def asistencia_plantilla():
         for col in range(18, 25):
             ws.cell(r, col, 0)
         ws.cell(r, 25).value = f"=SUM(R{r}:X{r})"                                    # TOTAL HE
-        ws.cell(r, 26, "")                                                          # TIPO
-        ws.cell(r, 27, "")                                                          # VALOR
+        ws.cell(r, 26, obra["he_tipo_sugerido"] or "")                              # TIPO (sugerido)
+        ws.cell(r, 27, _num(obra["he_valor_sugerido"]) or "")                       # VALOR (sugerido)
         # Retardos (AB-AH) = 0
         for col in range(28, 35):
             ws.cell(r, col, 0)
@@ -4917,6 +4971,8 @@ def asistencia_plantilla():
         ("SUELDO REGISTRADO y VIATICOS REGISTRADOS (columnas grises junto al nombre): son solo para revisar,", False),
         ("  muestran lo que cada trabajador tiene dado de alta en el catalogo de sueldos. No se editan;", False),
         ("  la nomina se calcula siempre con lo que este en el catalogo, no con lo que diga aqui.", False),
+        ("TIPO y VALOR de horas extra ya vienen precargados con lo sugerido para esta obra (configurable", False),
+        ("  en Obras > Editar). Se puede cambiar renglon por renglon si algun trabajador es distinto.", False),
     ]
     for i, (txt, boldl) in enumerate(lineas, start=1):
         c = ins.cell(i, 1, txt)
@@ -5070,6 +5126,8 @@ def nomina():
     db = get_db()
     obras = obras_visibles(db)
     if request.method == "POST":
+        if role_rank(session.get("role", "")) < GERENTE_RANK:
+            abort(403)
         obra_id = int(request.form.get("obra_id") or 0)
         finicio = request.form.get("fecha_inicio", "")
         aplicar_retardos = 1 if request.form.get("aplicar_retardos") else 0
@@ -5123,6 +5181,7 @@ def nomina():
         for b in avisos_baja:
             db.execute("UPDATE empleados SET estatus='baja', fecha_baja=COALESCE(fecha_baja, ?) WHERE id=?",
                        (b["baja_fecha"], b["empleado_id"]))
+            db.execute("UPDATE empleado_puestos SET activo=0 WHERE empleado_id=?", (b["empleado_id"],))
             registrar_bitacora(db, "Baja de trabajador",
                                f"{b['nombre']} (cedula {b['cedula']}, NSS {b['nss']}) baja desde {b['baja_fecha']}")
             send_admin_alert(

@@ -6,6 +6,7 @@
   <span class="badge text-bg-light">Sube el Excel de asistencia lleno</span>
 </div>
 
+{% if current_user.rank >= GERENTE_RANK %}
 <div class="card p-3 mb-4 border-primary">
   <h6 class="text-navy">Subir asistencia y calcular</h6>
   <p class="small text-muted mb-2">Sube el Excel que descargaste (con codigos de asistencia, horas extra,
@@ -39,6 +40,12 @@
     </div>
   </form>
 </div>
+{% else %}
+<div class="alert alert-info">
+  Aqui puedes ver y descargar las nominas ya calculadas de tus obras. Solo Superintendentes
+  y Administrador pueden calcular una nomina nueva.
+</div>
+{% endif %}
 
 <div class="card">
   <div class="card-header bg-white fw-bold text-navy">Nominas calculadas recientemente</div>

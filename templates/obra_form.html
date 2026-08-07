@@ -22,6 +22,27 @@
       <label class="form-label">Contrato</label>
       <input name="contrato" class="form-control" value="{{ obra.contrato or '' }}">
     </div>
+    <div class="col-12"><hr></div>
+    <div class="col-12">
+      <label class="form-label mb-0">Horas extra sugeridas (opcional)</label>
+      <div class="form-text mt-0 mb-2">
+        Se precarga en la plantilla de asistencia de esta obra (columnas TIPO y VALOR), pero
+        se puede cambiar renglon por renglon al llenarla.
+      </div>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label small mb-1">Tipo de calculo</label>
+      <select name="he_tipo_sugerido" class="form-select">
+        <option value="">Sin sugerencia (en blanco)</option>
+        <option value="Factor" {{ 'selected' if obra.he_tipo_sugerido=='Factor' }}>Factor (multiplica el pago por hora)</option>
+        <option value="Precio" {{ 'selected' if obra.he_tipo_sugerido=='Precio' }}>Precio por hora fijo</option>
+      </select>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label small mb-1">Valor sugerido</label>
+      <input name="he_valor_sugerido" type="number" step="0.01" class="form-control"
+             value="{{ obra.he_valor_sugerido or '' }}" placeholder="Ej. 1.5 (factor) o 65.00 (precio/hora)">
+    </div>
     <div class="col-12 d-flex gap-2">
       <button class="btn btn-primary">Guardar cambios</button>
       <a class="btn btn-outline-secondary" href="{{ url_for('obras') }}">Cancelar</a>
