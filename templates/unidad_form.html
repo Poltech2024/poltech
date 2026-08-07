@@ -41,6 +41,17 @@
       <option {{ 'selected' if u.estatus=='Baja' }}>Baja</option>
     </select></div>
 
+  <div class="col-md-8">
+    <label class="form-label small mb-1">Vincular con equipo (opcional)</label>
+    <select name="equipo_id" class="form-select">
+      <option value="">Sin vincular...</option>
+      {% for eq in equipos_disponibles %}
+      <option value="{{ eq.id }}" {{ 'selected' if u.equipo_id==eq.id }}>{{ eq.cedula }} — {{ eq.nombre }}</option>
+      {% endfor %}
+    </select>
+    <div class="form-text">Si esta unidad también está en el catálogo de Herramienta y Equipo, ligala aquí para compartir la misma cédula.</div>
+  </div>
+
   <div class="col-12 d-flex gap-2">
     <button class="btn btn-primary">Guardar cambios</button>
     <a class="btn btn-outline-secondary" href="{{ url_for('unidades') }}">Cancelar</a>

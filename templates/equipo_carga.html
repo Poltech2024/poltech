@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h3 class="mb-0">Carga masiva de Herramienta y Equipo</h3>
+  <a class="btn btn-outline-secondary" href="{{ url_for('equipos') }}">Volver al catálogo</a>
+</div>
+
+<div class="card p-4 mb-3" style="max-width:720px">
+  <p class="text-muted mb-2">
+    1. Descarga la plantilla (o usa directamente tu propio Excel, si tiene las mismas columnas) &middot;
+    2. Llena una fila por cada equipo &middot; 3. Súbela aquí. A cada equipo se le asigna una
+    cédula automática (EQ-0001, EQ-0002, ...).
+  </p>
+  <a class="btn btn-outline-primary mb-3" href="{{ url_for('equipo_plantilla') }}">Descargar plantilla</a>
+
+  <form method="post" enctype="multipart/form-data" class="row g-2 align-items-end">
+    <div class="col-md-8"><input type="file" name="archivo" accept=".xlsx" class="form-control" required></div>
+    <div class="col-md-4"><button class="btn btn-primary w-100">Subir y procesar</button></div>
+  </form>
+  <div class="form-text mt-2">
+    Columnas esperadas (en este orden): MAQUINARIA, Categoria, Propiedad, Propietario,
+    Documentacion, Condicion, No de serie, Año, Precio de compra, Precio estimado de venta, Observaciones.
+    Solo el nombre (columna A) es obligatorio.
+  </div>
+</div>
+
+{% if resumen %}
+<div class="card p-4" style="max-width:720px">
+  <h5 class="text-navy">Resultado</h5>
+  <p class="mb-2"><b>{{ resumen.creados }}</b> equipos se agregaron al catálogo.</p>
+  {% if resumen.errores %}
+  <div class="alert alert-danger">
+    <b>Filas omitidas ({{ resumen.errores|length }}):</b>
+    <ul class="mb-0">{% for e in resumen.errores %}<li>{{ e }}</li>{% endfor %}</ul>
+  </div>
+  {% endif %}
+  {% if not resumen.errores %}
+  <div class="alert alert-success mb-0">Todo se procesó sin problemas.</div>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

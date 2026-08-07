@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block content %}
+<h3 class="mb-3">Herramienta y Equipo</h3>
+<div class="row g-3 mb-4">
+  <div class="col-6 col-md-3"><div class="card card-stat text-center p-3"><div class="num">{{ stats.equipos }}</div><div class="text-muted small">Equipos activos</div></div></div>
+  <div class="col-6 col-md-3"><div class="card card-stat text-center p-3"><div class="num">{{ stats.vinculados }}</div><div class="text-muted small">Vinculados a Embarques</div></div></div>
+</div>
+<div class="card p-3">
+  <h6 class="text-navy">Para empezar (en orden):</h6>
+  <ol class="mb-0 small">
+    <li>Da de alta tu <a href="{{ url_for('equipos') }}">catálogo de maquinaria y equipo</a> (uno por uno, o con la <a href="{{ url_for('equipo_carga') }}">carga masiva por Excel</a>).</li>
+    <li>Cada equipo recibe una <b>cédula</b> automática (ej. EQ-0001) que lo identifica.</li>
+    <li>Si un equipo también es una unidad de transporte (camión, tráiler), ligalo desde el <a href="{{ url_for('unidades') }}">catálogo de unidades de Embarques</a> para que comparta la misma cédula.</li>
+  </ol>
+</div>
+{% endblock %}

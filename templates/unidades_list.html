@@ -21,6 +21,14 @@
     <div class="col-md-3"><input name="numero_economico" class="form-control" placeholder="VIN / número económico"></div>
     <div class="col-md-2"><label class="form-label small mb-0">Vigencia seguro</label><input name="vigencia_seguro" type="date" class="form-control"></div>
     <div class="col-md-2"><label class="form-label small mb-0">Vigencia verificación</label><input name="vigencia_verificacion" type="date" class="form-control"></div>
+    <div class="col-md-4">
+      <label class="form-label small mb-0">Vincular con equipo (opcional)</label>
+      <select name="equipo_id" class="form-select">
+        <option value="">Sin vincular...</option>
+        {% for eq in equipos_disponibles %}<option value="{{ eq.id }}">{{ eq.cedula }} — {{ eq.nombre }}</option>{% endfor %}
+      </select>
+      <div class="form-text">Si esta unidad tambien esta en el catálogo de Herramienta y Equipo, ligala aquí para compartir la misma cédula.</div>
+    </div>
     <div class="col-12"><button class="btn btn-primary">Agregar unidad</button></div>
   </form>
 </div>
@@ -30,7 +38,7 @@
     <table class="table table-sm align-middle mb-0">
       <thead><tr>
         <th>Clave</th><th>Tipo</th><th>Marca/Modelo</th><th class="text-end">Capacidad</th>
-        <th class="text-end">Rendimiento</th><th>Placas</th><th>Estatus</th><th></th>
+        <th class="text-end">Rendimiento</th><th>Placas</th><th>Cédula equipo</th><th>Estatus</th><th></th>
       </tr></thead>
       <tbody>
         {% for u in unidades %}
@@ -41,6 +49,10 @@
           <td class="text-end">{{ u.capacidad_toneladas }} ton</td>
           <td class="text-end">{{ u.rendimiento_km_l }} km/l</td>
           <td class="small">{{ u.placas or '-' }}</td>
+          <td class="small">
+            {% if u.equipo_cedula %}<span class="badge text-bg-info">{{ u.equipo_cedula }}</span> {{ u.equipo_nombre }}
+            {% else %}-{% endif %}
+          </td>
           <td>
             {% if u.estatus == 'Activa' %}<span class="badge text-bg-success">Activa</span>
             {% else %}<span class="badge text-bg-secondary">{{ u.estatus }}</span>{% endif %}
@@ -51,7 +63,7 @@
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="8" class="text-center text-muted py-4">Aún no hay unidades en el catálogo.</td></tr>
+        <tr><td colspan="9" class="text-center text-muted py-4">Aún no hay unidades en el catálogo.</td></tr>
         {% endfor %}
       </tbody>
     </table>

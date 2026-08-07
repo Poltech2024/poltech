@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h3 class="mb-0">Editar equipo {{ eq.cedula }}</h3>
+  <a class="btn btn-outline-secondary" href="{{ url_for('equipos') }}">Volver al catálogo</a>
+</div>
+
+{% if unidad_vinculada %}
+<div class="alert alert-info" style="max-width:800px">
+  Este equipo está vinculado con la unidad de Embarques
+  <a href="{{ url_for('unidad_editar', unidad_id=unidad_vinculada.id) }}"><b>{{ unidad_vinculada.clave or unidad_vinculada.tipo }}</b></a>.
+</div>
+{% endif %}
+
+<form method="post" class="card p-4 row g-3" style="max-width:800px">
+  <div class="col-md-8"><label class="form-label small mb-1">Nombre de la maquinaria/equipo *</label>
+    <input name="nombre" class="form-control" value="{{ eq.nombre }}" required></div>
+  <div class="col-md-4"><label class="form-label small mb-1">Cédula</label>
+    <input class="form-control" value="{{ eq.cedula }}" disabled>
+    <div class="form-text">Se asigna automáticamente, no se puede cambiar.</div></div>
+
+  <div class="col-md-3"><label class="form-label small mb-1">Categoría</label>
+    <select name="categoria" class="form-select">
+      <option value="">Selecciona...</option>
+      {% for c in categorias %}<option {{ 'selected' if eq.categoria==c }}>{{ c }}</option>{% endfor %}
+    </select></div>
+  <div class="col-md-3"><label class="form-label small mb-1">Propiedad</label>
+    <select name="propiedad" class="form-select">
+      <option value="">Selecciona...</option>
+      {% for p in propiedades %}<option {{ 'selected' if eq.propiedad==p }}>{{ p }}</option>{% endfor %}
+    </select></div>
+  <div class="col-md-3"><label class="form-label small mb-1">Propietario</label>
+    <input name="propietario" class="form-control" value="{{ eq.propietario or '' }}"></div>
+  <div class="col-md-3"><label class="form-label small mb-1">Condición</label>
+    <select name="condicion" class="form-select">
+      <option value="">Selecciona...</option>
+      {% for c in condiciones %}<option {{ 'selected' if eq.condicion==c }}>{{ c }}</option>{% endfor %}
+    </select></div>
+
+  <div class="col-md-4"><label class="form-label small mb-1">Documentación</label>
+    <input name="documentacion" class="form-control" value="{{ eq.documentacion or '' }}"></div>
+  <div class="col-md-4"><label class="form-label small mb-1">No. de serie</label>
+    <input name="no_serie" class="form-control" value="{{ eq.no_serie or '' }}"></div>
+  <div class="col-md-4"><label class="form-label small mb-1">Año</label>
+    <input name="anio" type="number" class="form-control" value="{{ eq.anio or '' }}"></div>
+
+  <div class="col-md-4"><label class="form-label small mb-1">Precio de compra</label>
+    <input name="precio_compra" type="number" step="0.01" class="form-control" value="{{ eq.precio_compra or '' }}"></div>
+  <div class="col-md-4"><label class="form-label small mb-1">Precio estimado de venta</label>
+    <input name="precio_venta_estimado" type="number" step="0.01" class="form-control" value="{{ eq.precio_venta_estimado or '' }}"></div>
+  <div class="col-md-4"><label class="form-label small mb-1">Estatus</label>
+    <select name="estatus" class="form-select">
+      <option {{ 'selected' if eq.estatus=='Activo' }}>Activo</option>
+      <option {{ 'selected' if eq.estatus=='Baja' }}>Baja</option>
+    </select></div>
+
+  <div class="col-12"><label class="form-label small mb-1">Observaciones</label>
+    <input name="observaciones" class="form-control" value="{{ eq.observaciones or '' }}"></div>
+
+  <div class="col-12 d-flex gap-2">
+    <button class="btn btn-primary">Guardar cambios</button>
+    <a class="btn btn-outline-secondary" href="{{ url_for('equipos') }}">Cancelar</a>
+  </div>
+</form>
+{% endblock %}

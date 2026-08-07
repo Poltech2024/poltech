@@ -49,6 +49,27 @@
     </div>
     {% endif %}
   </div>
+  <div class="col-md-5 col-lg-4">
+    {% if puede_equipo %}
+    <a href="{{ url_for('equipo_inicio') }}" class="text-decoration-none">
+      <div class="card p-4 h-100 shadow-sm modulo-card">
+        <div class="fs-1 mb-2">&#128295;</div>
+        <h4 class="text-navy mb-1">Herramienta y Equipo</h4>
+        <p class="text-muted small mb-0">
+          Cat&aacute;logo de maquinaria, herramienta y equipo: c&eacute;dula, propietario,
+          condici&oacute;n y vinculaci&oacute;n con las unidades de Embarques.
+        </p>
+      </div>
+    </a>
+    {% else %}
+    <div class="card p-4 h-100 modulo-card modulo-card-disabled">
+      <div class="fs-1 mb-2">&#128295;</div>
+      <h4 class="text-muted mb-1">Herramienta y Equipo</h4>
+      <p class="text-muted small mb-0">Cat&aacute;logo de maquinaria y equipo.</p>
+      <span class="badge text-bg-secondary mt-2 align-self-start">Sin acceso</span>
+    </div>
+    {% endif %}
+  </div>
 </div>
 
 <style>

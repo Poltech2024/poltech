@@ -29,7 +29,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.environ.get("DB_PATH", os.path.join(APP_DIR, "poltech.db"))
 
-APP_VERSION = "1.39"   # version del sistema (visible en el menu)
+APP_VERSION = "1.40"   # version del sistema (visible en el menu)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-cambia-esta-clave-en-render")
@@ -416,6 +416,24 @@ CREATE TABLE IF NOT EXISTS reingreso_solicitudes (
     FOREIGN KEY (empleado_id) REFERENCES empleados(id),
     FOREIGN KEY (puesto_id_nuevo) REFERENCES puestos(id)
 );
+CREATE TABLE IF NOT EXISTS equipos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cedula TEXT UNIQUE,
+    nombre TEXT NOT NULL,
+    categoria TEXT,
+    propiedad TEXT,
+    propietario TEXT,
+    documentacion TEXT,
+    condicion TEXT,
+    no_serie TEXT,
+    anio INTEGER,
+    precio_compra REAL,
+    precio_venta_estimado REAL,
+    observaciones TEXT,
+    estatus TEXT DEFAULT 'Activo',
+    creado_en TEXT,
+    creado_por TEXT
+);
 CREATE TABLE IF NOT EXISTS unidades (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     clave TEXT,
@@ -581,6 +599,11 @@ def init_db():
             db.execute(f"ALTER TABLE nomina_detalle ADD COLUMN {col} {tipo}")
         except sqlite3.OperationalError:
             pass
+    # Migracion suave: liga entre una unidad de embarques y su equipo (cedula madre)
+    try:
+        db.execute("ALTER TABLE unidades ADD COLUMN equipo_id INTEGER REFERENCES equipos(id)")
+    except sqlite3.OperationalError:
+        pass
     # Migracion suave: sembrar la tabla de clasificaciones con la lista fija anterior
     if db.execute("SELECT COUNT(*) FROM clasificaciones").fetchone()[0] == 0:
         for nombre in CLASIFICACIONES:
@@ -932,6 +955,30 @@ def embarques_required(f):
             abort(403)
         return f(*a, **k)
     return wrapper
+
+
+# ---------------------------------------------------------------------------
+# Herramienta y Equipo: catalogo de maquinaria/equipo
+# ---------------------------------------------------------------------------
+CATEGORIAS_EQUIPO = ["Taller", "Unidad Transporte", "Grua", "Generador", "Perneadora", "Servicio", "Otra"]
+PROPIEDAD_EQUIPO = ["Directa", "En sociedad", "Propiedad de alguien mas"]
+CONDICION_EQUIPO = ["Operable", "Descompuesto", "En reparacion"]
+
+def puede_ver_equipo():
+    return session.get("role") in ("admin", "gerente_embarques")
+
+def equipo_required(f):
+    @wraps(f)
+    def wrapper(*a, **k):
+        if not session.get("user_id"):
+            return redirect(url_for("login"))
+        if not puede_ver_equipo():
+            abort(403)
+        return f(*a, **k)
+    return wrapper
+
+def generar_cedula_equipo(equipo_id):
+    return f"EQ-{equipo_id:04d}"
 
 
 # (limite_1, limite_2, tarifa_1, tarifa_2) del viaje redondo, en pesos por km:
@@ -2053,8 +2100,8 @@ def logout():
 @login_required
 def inicio():
     """Pantalla de inicio: elegir modulo, segun a lo que el usuario tenga acceso."""
-    return render_template("inicio.html", hide_sidebar=True,
-                           puede_nominas=puede_ver_nominas(), puede_embarques=puede_ver_embarques())
+    return render_template("inicio.html", hide_sidebar=True, puede_nominas=puede_ver_nominas(),
+                           puede_embarques=puede_ver_embarques(), puede_equipo=puede_ver_equipo())
 
 
 @app.route("/nominas")
@@ -5762,18 +5809,22 @@ def unidades():
         if rendimiento <= 0:
             flash("El rendimiento (km/litro) debe ser mayor a 0.", "danger")
             return redirect(url_for("unidades"))
+        equipo_id = int(request.form.get("equipo_id") or 0) or None
+        if equipo_id and db.execute("SELECT id FROM unidades WHERE equipo_id=?", (equipo_id,)).fetchone():
+            flash("Ese equipo ya esta vinculado a otra unidad.", "danger")
+            return redirect(url_for("unidades"))
         cur = db.execute(
             "INSERT INTO unidades(clave, marca, modelo, anio, tipo, capacidad_toneladas, "
             "rendimiento_km_l, combustible, placas, numero_economico, vigencia_seguro, "
-            "vigencia_verificacion, estatus, creado_en, creado_por) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "vigencia_verificacion, estatus, equipo_id, creado_en, creado_por) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (clave, request.form.get("marca", "").strip(), request.form.get("modelo", "").strip(),
              int(request.form.get("anio") or 0) or None, tipo,
              float(request.form.get("capacidad_toneladas") or 0), rendimiento,
              request.form.get("combustible", "Diesel"), request.form.get("placas", "").strip(),
              request.form.get("numero_economico", "").strip(),
              request.form.get("vigencia_seguro", ""), request.form.get("vigencia_verificacion", ""),
-             "Activa", date.today().isoformat(), session.get("nombre")))
+             "Activa", equipo_id, date.today().isoformat(), session.get("nombre")))
         unidad_id = cur.lastrowid
         for item in CHECKLIST_ITEMS.get(tipo, CHECKLIST_BASE):
             db.execute("INSERT INTO unidad_checklist(unidad_id, item, estatus) VALUES(?,?,'Pendiente')",
@@ -5782,8 +5833,15 @@ def unidades():
         flash(f"Unidad '{clave or tipo}' agregada al catalogo.", "success")
         return redirect(url_for("unidades"))
 
-    filas = db.execute("SELECT * FROM unidades ORDER BY estatus DESC, tipo, clave").fetchall()
-    return render_template("unidades_list.html", unidades=filas, tipos=TIPOS_UNIDAD, modulo="embarques")
+    filas = db.execute(
+        "SELECT u.*, eq.cedula AS equipo_cedula, eq.nombre AS equipo_nombre "
+        "FROM unidades u LEFT JOIN equipos eq ON eq.id=u.equipo_id "
+        "ORDER BY u.estatus DESC, u.tipo, u.clave").fetchall()
+    equipos_disponibles = db.execute(
+        "SELECT id, cedula, nombre FROM equipos WHERE estatus='Activo' AND "
+        "id NOT IN (SELECT equipo_id FROM unidades WHERE equipo_id IS NOT NULL) ORDER BY nombre").fetchall()
+    return render_template("unidades_list.html", unidades=filas, tipos=TIPOS_UNIDAD,
+                           equipos_disponibles=equipos_disponibles, modulo="embarques")
 
 
 @app.route("/unidad/<int:unidad_id>/editar", methods=["GET", "POST"])
@@ -5798,21 +5856,31 @@ def unidad_editar(unidad_id):
         if rendimiento <= 0:
             flash("El rendimiento (km/litro) debe ser mayor a 0.", "danger")
             return redirect(url_for("unidad_editar", unidad_id=unidad_id))
+        equipo_id = int(request.form.get("equipo_id") or 0) or None
+        if equipo_id and db.execute("SELECT id FROM unidades WHERE equipo_id=? AND id!=?",
+                                    (equipo_id, unidad_id)).fetchone():
+            flash("Ese equipo ya esta vinculado a otra unidad.", "danger")
+            return redirect(url_for("unidad_editar", unidad_id=unidad_id))
         db.execute(
             "UPDATE unidades SET clave=?, marca=?, modelo=?, anio=?, capacidad_toneladas=?, "
             "rendimiento_km_l=?, combustible=?, placas=?, numero_economico=?, vigencia_seguro=?, "
-            "vigencia_verificacion=?, estatus=? WHERE id=?",
+            "vigencia_verificacion=?, estatus=?, equipo_id=? WHERE id=?",
             (request.form.get("clave", "").strip(), request.form.get("marca", "").strip(),
              request.form.get("modelo", "").strip(), int(request.form.get("anio") or 0) or None,
              float(request.form.get("capacidad_toneladas") or 0), rendimiento,
              request.form.get("combustible", "Diesel"), request.form.get("placas", "").strip(),
              request.form.get("numero_economico", "").strip(),
              request.form.get("vigencia_seguro", ""), request.form.get("vigencia_verificacion", ""),
-             request.form.get("estatus", "Activa"), unidad_id))
+             request.form.get("estatus", "Activa"), equipo_id, unidad_id))
         db.commit()
         flash("Unidad actualizada.", "success")
         return redirect(url_for("unidades"))
-    return render_template("unidad_form.html", u=u, tipos=TIPOS_UNIDAD, modulo="embarques")
+    equipos_disponibles = db.execute(
+        "SELECT id, cedula, nombre FROM equipos WHERE estatus='Activo' AND "
+        "(id NOT IN (SELECT equipo_id FROM unidades WHERE equipo_id IS NOT NULL) OR id=?) "
+        "ORDER BY nombre", (u["equipo_id"] or 0,)).fetchall()
+    return render_template("unidad_form.html", u=u, tipos=TIPOS_UNIDAD,
+                           equipos_disponibles=equipos_disponibles, modulo="embarques")
 
 
 @app.route("/unidad/<int:unidad_id>/checklist", methods=["GET", "POST"])
@@ -5907,6 +5975,204 @@ def flete_cotizaciones():
         "SELECT f.*, u.clave AS unidad_clave, u.tipo AS unidad_tipo FROM fletes_cotizaciones f "
         "LEFT JOIN unidades u ON u.id=f.unidad_id ORDER BY f.creado_en DESC").fetchall()
     return render_template("flete_cotizaciones.html", cotizaciones=filas, modulo="embarques")
+
+
+# ---------------------------------------------------------------------------
+# Herramienta y Equipo: catalogo de maquinaria/equipo
+# ---------------------------------------------------------------------------
+@app.route("/equipo")
+@equipo_required
+def equipo_inicio():
+    db = get_db()
+    stats = {
+        "equipos": db.execute("SELECT COUNT(*) FROM equipos WHERE estatus='Activo'").fetchone()[0],
+        "vinculados": db.execute("SELECT COUNT(*) FROM unidades WHERE equipo_id IS NOT NULL").fetchone()[0],
+    }
+    return render_template("equipo_inicio.html", stats=stats, modulo="equipo")
+
+
+@app.route("/equipos", methods=["GET", "POST"])
+@equipo_required
+def equipos():
+    db = get_db()
+    if request.method == "POST":
+        nombre = request.form.get("nombre", "").strip()
+        if not nombre:
+            flash("Captura el nombre de la maquinaria/equipo.", "danger")
+            return redirect(url_for("equipos"))
+        cur = db.execute(
+            "INSERT INTO equipos(nombre, categoria, propiedad, propietario, documentacion, condicion, "
+            "no_serie, anio, precio_compra, precio_venta_estimado, observaciones, estatus, "
+            "creado_en, creado_por) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (nombre, request.form.get("categoria", "").strip(), request.form.get("propiedad", "").strip(),
+             request.form.get("propietario", "").strip(), request.form.get("documentacion", "").strip(),
+             request.form.get("condicion", "").strip(), request.form.get("no_serie", "").strip(),
+             int(request.form.get("anio") or 0) or None,
+             float(request.form.get("precio_compra") or 0) or None,
+             float(request.form.get("precio_venta_estimado") or 0) or None,
+             request.form.get("observaciones", "").strip(), "Activo",
+             date.today().isoformat(), session.get("nombre")))
+        equipo_id = cur.lastrowid
+        db.execute("UPDATE equipos SET cedula=? WHERE id=?", (generar_cedula_equipo(equipo_id), equipo_id))
+        db.commit()
+        flash(f"Equipo '{nombre}' agregado al catalogo con cedula {generar_cedula_equipo(equipo_id)}.", "success")
+        return redirect(url_for("equipos"))
+
+    q = request.args.get("q", "").strip()
+    f_categoria = request.args.get("categoria", "").strip()
+    ver_todos = request.args.get("ver_todos") == "1"
+    sql = "SELECT * FROM equipos WHERE 1=1"
+    params = []
+    if not ver_todos:
+        sql += " AND estatus='Activo'"
+    if f_categoria:
+        sql += " AND categoria=?"
+        params.append(f_categoria)
+    if q:
+        sql += " AND (nombre LIKE ? OR cedula LIKE ? OR no_serie LIKE ?)"
+        params += [f"%{q}%", f"%{q}%", f"%{q}%"]
+    sql += " ORDER BY categoria, nombre"
+    filas = db.execute(sql, params).fetchall()
+    return render_template("equipos_list.html", equipos=filas, categorias=CATEGORIAS_EQUIPO,
+                           propiedades=PROPIEDAD_EQUIPO, condiciones=CONDICION_EQUIPO,
+                           q=q, f_categoria=f_categoria, ver_todos=ver_todos, modulo="equipo")
+
+
+@app.route("/equipo/<int:equipo_id>/editar", methods=["GET", "POST"])
+@equipo_required
+def equipo_editar(equipo_id):
+    db = get_db()
+    eq = db.execute("SELECT * FROM equipos WHERE id=?", (equipo_id,)).fetchone()
+    if not eq:
+        abort(404)
+    if request.method == "POST":
+        nombre = request.form.get("nombre", "").strip()
+        if not nombre:
+            flash("Captura el nombre de la maquinaria/equipo.", "danger")
+            return redirect(url_for("equipo_editar", equipo_id=equipo_id))
+        db.execute(
+            "UPDATE equipos SET nombre=?, categoria=?, propiedad=?, propietario=?, documentacion=?, "
+            "condicion=?, no_serie=?, anio=?, precio_compra=?, precio_venta_estimado=?, "
+            "observaciones=?, estatus=? WHERE id=?",
+            (nombre, request.form.get("categoria", "").strip(), request.form.get("propiedad", "").strip(),
+             request.form.get("propietario", "").strip(), request.form.get("documentacion", "").strip(),
+             request.form.get("condicion", "").strip(), request.form.get("no_serie", "").strip(),
+             int(request.form.get("anio") or 0) or None,
+             float(request.form.get("precio_compra") or 0) or None,
+             float(request.form.get("precio_venta_estimado") or 0) or None,
+             request.form.get("observaciones", "").strip(),
+             request.form.get("estatus", "Activo"), equipo_id))
+        db.commit()
+        flash("Equipo actualizado.", "success")
+        return redirect(url_for("equipos"))
+    unidad_vinculada = db.execute("SELECT * FROM unidades WHERE equipo_id=?", (equipo_id,)).fetchone()
+    return render_template("equipo_form.html", eq=eq, categorias=CATEGORIAS_EQUIPO,
+                           propiedades=PROPIEDAD_EQUIPO, condiciones=CONDICION_EQUIPO,
+                           unidad_vinculada=unidad_vinculada, modulo="equipo")
+
+
+EQUIPO_CARGA_COLS = ["MAQUINARIA", "CATEGORIA", "PROPIEDAD", "PROPIETARIO", "DOCUMENTACION",
+                     "CONDICION", "NO DE SERIE", "ANIO", "PRECIO DE COMPRA",
+                     "PRECIO ESTIMADO DE VENTA", "OBSERVACIONES"]
+
+NORMALIZA_EQUIPO = {
+    "generadore": "Generador", "generadores": "Generador", "servicio": "Servicio",
+    "porpiedad de alguien mas": "Propiedad de alguien mas",
+}
+
+def _norm_equipo_txt(v):
+    txt = str(v or "").strip()
+    return NORMALIZA_EQUIPO.get(txt.lower(), txt)
+
+
+@app.route("/equipos/plantilla")
+@equipo_required
+def equipo_plantilla():
+    from openpyxl.styles import Font, PatternFill
+    from openpyxl.worksheet.datavalidation import DataValidation
+    from openpyxl.workbook.defined_name import DefinedName
+
+    wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Equipo"
+    ws.append(["MAQUINARIA", "Categoria", "Propiedad", "Propietario", "Documentacion",
+              "Condicion", "No de serie", "Año", "Precio de compra",
+              "Precio estimado de venta", "Observaciones"])
+    for c in ws[1]:
+        c.font = Font(bold=True, color="FFFFFF")
+        c.fill = PatternFill("solid", fgColor="16233C")
+    anchos = [38, 16, 20, 26, 16, 14, 22, 8, 16, 20, 30]
+    for col, w in zip("ABCDEFGHIJK", anchos):
+        ws.column_dimensions[col].width = w
+
+    lst = wb.create_sheet("Listas"); lst.sheet_state = "hidden"
+    for idx, val in enumerate(CATEGORIAS_EQUIPO, start=1):
+        lst.cell(row=idx, column=1, value=val)
+    for idx, val in enumerate(PROPIEDAD_EQUIPO, start=1):
+        lst.cell(row=idx, column=2, value=val)
+    for idx, val in enumerate(CONDICION_EQUIPO, start=1):
+        lst.cell(row=idx, column=3, value=val)
+    wb.defined_names["ListaCategoriasEquipo"] = DefinedName(
+        "ListaCategoriasEquipo", attr_text=f"Listas!$A$1:$A${len(CATEGORIAS_EQUIPO)}")
+    wb.defined_names["ListaPropiedadEquipo"] = DefinedName(
+        "ListaPropiedadEquipo", attr_text=f"Listas!$B$1:$B${len(PROPIEDAD_EQUIPO)}")
+    wb.defined_names["ListaCondicionEquipo"] = DefinedName(
+        "ListaCondicionEquipo", attr_text=f"Listas!$C$1:$C${len(CONDICION_EQUIPO)}")
+
+    dv_cat = DataValidation(type="list", formula1="ListaCategoriasEquipo", allow_blank=True)
+    ws.add_data_validation(dv_cat); dv_cat.add("B2:B500")
+    dv_prop = DataValidation(type="list", formula1="ListaPropiedadEquipo", allow_blank=True)
+    ws.add_data_validation(dv_prop); dv_prop.add("C2:C500")
+    dv_cond = DataValidation(type="list", formula1="ListaCondicionEquipo", allow_blank=True)
+    ws.add_data_validation(dv_cond); dv_cond.add("F2:F500")
+
+    buf = io.BytesIO(); wb.save(buf); buf.seek(0)
+    return send_file(buf, as_attachment=True, download_name="Plantilla Herramienta y Equipo.xlsx",
+                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
+@app.route("/equipos/carga", methods=["GET", "POST"])
+@equipo_required
+def equipo_carga():
+    if request.method == "POST":
+        archivo = request.files.get("archivo")
+        if not archivo or not archivo.filename.lower().endswith(".xlsx"):
+            flash("Sube un archivo Excel (.xlsx).", "danger")
+            return redirect(url_for("equipo_carga"))
+        db = get_db()
+        wb = openpyxl.load_workbook(archivo, data_only=True)
+        ws = wb.active
+        creados = 0
+        errores = []
+        for i, fila in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+            if fila is None or all(c is None or str(c).strip() == "" for c in fila):
+                continue
+            vals = (list(fila) + [None] * 11)[:11]
+            nombre = str(vals[0] or "").strip()
+            if not nombre:
+                errores.append(f"Fila {i}: no tiene nombre de maquinaria/equipo, se omitio.")
+                continue
+            anio = None
+            try:
+                anio = int(vals[7]) if vals[7] not in (None, "") else None
+            except (ValueError, TypeError):
+                pass
+            precio_compra = _num(vals[8]) or None
+            precio_venta = _num(vals[9]) or None
+            cur = db.execute(
+                "INSERT INTO equipos(nombre, categoria, propiedad, propietario, documentacion, "
+                "condicion, no_serie, anio, precio_compra, precio_venta_estimado, observaciones, "
+                "estatus, creado_en, creado_por) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (nombre, _norm_equipo_txt(vals[1]), _norm_equipo_txt(vals[2]),
+                 str(vals[3] or "").strip(), str(vals[4] or "").strip(), _norm_equipo_txt(vals[5]),
+                 str(vals[6] or "").strip(), anio, precio_compra, precio_venta,
+                 str(vals[10] or "").strip(), "Activo",
+                 date.today().isoformat(), session.get("nombre")))
+            db.execute("UPDATE equipos SET cedula=? WHERE id=?",
+                      (generar_cedula_equipo(cur.lastrowid), cur.lastrowid))
+            creados += 1
+        db.commit()
+        resumen = {"creados": creados, "errores": errores}
+        return render_template("equipo_carga.html", resumen=resumen, modulo="equipo")
+    return render_template("equipo_carga.html", resumen=None, modulo="equipo")
 
 
 @app.errorhandler(403)

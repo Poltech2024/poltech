@@ -67,6 +67,10 @@
       <a href="{{ url_for('unidades') }}">Catalogo de unidades</a>
       <a href="{{ url_for('flete_cotizar') }}">Cotizar flete</a>
       <a href="{{ url_for('flete_cotizaciones') }}">Historial de cotizaciones</a>
+      {% elif modulo == 'equipo' %}
+      <a href="{{ url_for('equipo_inicio') }}">Inicio</a>
+      <a href="{{ url_for('equipos') }}">Catalogo de equipo</a>
+      <a href="{{ url_for('equipo_carga') }}">Carga masiva</a>
       {% else %}
       <a href="{{ url_for('dashboard') }}">Inicio</a>
 
