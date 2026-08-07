@@ -29,7 +29,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.environ.get("DB_PATH", os.path.join(APP_DIR, "poltech.db"))
 
-APP_VERSION = "1.32"   # version del sistema (visible en el menu)
+APP_VERSION = "1.33"   # version del sistema (visible en el menu)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-cambia-esta-clave-en-render")
@@ -514,6 +514,11 @@ def init_db():
         db.execute("ALTER TABLE nomina_detalle ADD COLUMN bono REAL DEFAULT 0")
     except sqlite3.OperationalError:
         pass
+    for col, tipo in (("extra_pago", "REAL DEFAULT 0"), ("extra_motivo", "TEXT")):
+        try:
+            db.execute(f"ALTER TABLE nomina_detalle ADD COLUMN {col} {tipo}")
+        except sqlite3.OperationalError:
+            pass
     # Migracion suave: sembrar la tabla de clasificaciones con la lista fija anterior
     if db.execute("SELECT COUNT(*) FROM clasificaciones").fetchone()[0] == 0:
         for nombre in CLASIFICACIONES:
@@ -4541,6 +4546,7 @@ def asistencia_plantilla():
     cab += [f"{etqs[i]}\n{fechas[i]}" for i in range(7)]                 # Z-AF retardos
     cab += ["DESCUENTOS\nNOMINA", "DESCUENTOS A\nOTRA CUENTA"]           # AG-AH
     cab += ["OBSERVACIONES\n(a quien se deposita el desc. a otra cuenta)"]  # AI
+    cab += ["PAGO EXTRA\n(una sola vez)", "MOTIVO DEL\nPAGO EXTRA"]      # AJ-AK
     for i, t in enumerate(cab, start=1):
         hdr(ws.cell(HROW, i, t))
 
@@ -4573,12 +4579,16 @@ def asistencia_plantilla():
         ws.cell(r, 33, 0)                                                           # DESC NOMINA
         ws.cell(r, 34, 0)                                                           # DESC OTRA CUENTA
         ws.cell(r, 35, "")                                                          # OBSERVACIONES
-        for col in range(1, 36):
+        ws.cell(r, 36, 0)                                                           # PAGO EXTRA
+        ws.cell(r, 37, "")                                                          # MOTIVO PAGO EXTRA
+        for col in range(1, 38):
             cell = ws.cell(r, col)
             cell.font = F(size=9); cell.border = borde
-            if 4 <= col <= 34: cell.alignment = Alignment(horizontal="center")
+            if 4 <= col <= 34 or col == 36: cell.alignment = Alignment(horizontal="center")
         ws.cell(r, 35).fill = PatternFill("solid", fgColor=AMAR)
         ws.cell(r, 15).fill = PatternFill("solid", fgColor=AMAR)
+        ws.cell(r, 36).fill = PatternFill("solid", fgColor=AMAR)
+        ws.cell(r, 37).fill = PatternFill("solid", fgColor=AMAR)
         r += 1
     ult = r - 1
 
@@ -4600,8 +4610,10 @@ def asistencia_plantilla():
         dv("custom", "TRUE", f"O{HROW+1}:O{ult}",
            "Si hay baja, escribe la fecha como DD-MM-AAAA (ej. 15-08-2026).", "Fecha de baja")
         dv("decimal", "0", f"AG{HROW+1}:AH{ult}")               # descuentos
+        dv("decimal", "0", f"AJ{HROW+1}:AJ{ult}",
+           "Pago extra de una sola vez (no se repite la siguiente semana).", "Pago extra")
 
-    anchos = ([5, 10, 30] + [6]*7 + [7, 8, 6, 6, 12] + [6]*7 + [9, 9, 8] + [6]*7 + [12, 13, 32])
+    anchos = ([5, 10, 30] + [6]*7 + [7, 8, 6, 6, 12] + [6]*7 + [9, 9, 8] + [6]*7 + [12, 13, 32, 12, 28])
     for i, w in enumerate(anchos, start=1):
         ws.column_dimensions[L(i)].width = w
     ws.freeze_panes = "D8"
@@ -4610,6 +4622,7 @@ def asistencia_plantilla():
     ws.cell(lr, 3, "Codigos de ASISTENCIA:  A = Asistio    F = Falta    R = Retardo    V = Vacaciones    D = Descanso").font = F(size=9, bold=True, color=NAVY)
     ws.cell(lr+1, 3, "RETARDOS: escribe 1 en el dia que llego tarde.  HORAS EXTRAS: horas por dia + TIPO (Factor/Precio) y VALOR.").font = F(size=8, italic=True, color="555555")
     ws.cell(lr+2, 3, "BAJA: escribe la fecha del ultimo dia trabajado si el trabajador causa baja.  El DOMINGO no cuenta para la base de 6 dias.").font = F(size=8, italic=True, color="555555")
+    ws.cell(lr+3, 3, "PAGO EXTRA: importe extra de una sola vez para esta semana (no se repite despues). Escribe el motivo junto.").font = F(size=8, italic=True, color="555555")
 
     # ---- Hoja BAJAS (referencia) ----
     wb2 = wb.create_sheet("Bajas")
@@ -4652,7 +4665,10 @@ def asistencia_plantilla():
         ("   Con eso el sistema lo marca de baja y prepara el aviso para el IMSS.", False),
         ("8. DESCUENTOS NOMINA: importe a descontar (prestamo, herramienta, etc.).", False),
         ("   DESCUENTOS A OTRA CUENTA: importe que se le quita para depositar a otra persona.", False),
-        ("9. Guarda el archivo y subelo en el sistema (Asistencia semanal > Calcular nomina).", False),
+        ("9. PAGO EXTRA: para un pago de una sola vez (no recurrente, ej. un premio o apoyo puntual).", False),
+        ("   Escribe el importe y el MOTIVO. Solo se paga esta semana, no se repite despues.", False),
+        ("   Se autoriza junto con el resto de la nomina al darle 'Autorizar y liberar'.", False),
+        ("10. Guarda el archivo y subelo en el sistema (Asistencia semanal > Calcular nomina).", False),
     ]
     for i, (txt, boldl) in enumerate(lineas, start=1):
         c = ins.cell(i, 1, txt)
@@ -4741,6 +4757,11 @@ def calcular_nomina(db, obra_id, ws, jornada, aplicar_retardos, viernes=None):
         desc_nomina = _num(ws.cell(r, 33).value)
         desc_otra = _num(ws.cell(r, 34).value)
         obs = str(ws.cell(r, 35).value or "").strip()   # a quien se deposita el desc. a otra cuenta
+        extra_pago = _num(ws.cell(r, 36).value)
+        extra_motivo = str(ws.cell(r, 37).value or "").strip()
+        if extra_pago and not extra_motivo:
+            errores.append(f"Cedula '{cedula}' ({nombre}): tiene un pago extra de {extra_pago} "
+                            "sin motivo; escribe el motivo en la columna MOTIVO DEL PAGO EXTRA.")
         baja_fecha = normalizar_fecha(ws.cell(r, 15).value)
         if baja_fecha and not fecha_valida(baja_fecha):
             errores.append(
@@ -4770,7 +4791,8 @@ def calcular_nomina(db, obra_id, ws, jornada, aplicar_retardos, viernes=None):
         desc_retardos = 0.0
         if aplicar_retardos and retardos >= 3:
             desc_retardos = round((int(retardos) // 3) * sueldo_diario, 2)
-        neto = round(sueldo + viaticos + bono + he_importe - infonavit - desc_nomina - desc_otra - desc_retardos, 2)
+        neto = round(sueldo + viaticos + bono + he_importe + extra_pago
+                     - infonavit - desc_nomina - desc_otra - desc_retardos, 2)
 
         nom_full = " ".join(x for x in [emp["nombre"], emp["primer_apellido"], emp["segundo_apellido"]] if x)
         detalles.append({
@@ -4781,7 +4803,8 @@ def calcular_nomina(db, obra_id, ws, jornada, aplicar_retardos, viernes=None):
             "retardos": retardos, "vacaciones": dias_V, "sueldo": sueldo,
             "viaticos": viaticos, "bono": bono, "he_horas": he_horas, "he_importe": he_importe,
             "infonavit": infonavit, "desc_nomina": desc_nomina, "desc_otra": desc_otra,
-            "desc_retardos": desc_retardos, "neto": neto, "baja_fecha": baja_fecha, "nota": obs,
+            "desc_retardos": desc_retardos, "extra_pago": extra_pago, "extra_motivo": extra_motivo,
+            "neto": neto, "baja_fecha": baja_fecha, "nota": obs,
         })
         if baja_fecha:
             avisos_baja.append({
@@ -4841,13 +4864,13 @@ def nomina():
                 "INSERT INTO nomina_detalle(nomina_id, empleado_id, cedula, nombre, clasificacion, "
                 "sueldo_contratado, viaticos_contratado, dias, faltas, "
                 "retardos, vacaciones, sueldo, viaticos, bono, he_horas, he_importe, infonavit, "
-                "desc_nomina, desc_otra, desc_retardos, neto, baja_fecha, nota) "
-                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "desc_nomina, desc_otra, desc_retardos, extra_pago, extra_motivo, neto, baja_fecha, nota) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (nomina_id, d["empleado_id"], d["cedula"], d["nombre"], d["clasificacion"],
                  d["sueldo_contratado"], d["viaticos_contratado"], d["dias"], d["faltas"],
                  d["retardos"], d["vacaciones"], d["sueldo"], d["viaticos"], d["bono"], d["he_horas"],
                  d["he_importe"], d["infonavit"], d["desc_nomina"], d["desc_otra"],
-                 d["desc_retardos"], d["neto"], d["baja_fecha"], d["nota"]))
+                 d["desc_retardos"], d["extra_pago"], d["extra_motivo"], d["neto"], d["baja_fecha"], d["nota"]))
         # marcar bajas reportadas
         for b in avisos_baja:
             db.execute("UPDATE empleados SET estatus='baja', fecha_baja=COALESCE(fecha_baja, ?) WHERE id=?",
@@ -4909,9 +4932,9 @@ def nomina_resultado(nomina_id):
         abort(403)
     det = _con_contratado(db, db.execute(
         "SELECT * FROM nomina_detalle WHERE nomina_id=? ORDER BY nombre", (nomina_id,)).fetchall())
-    tot = {k: sum(_num(d[k]) for d in det) for k in
+    tot = {k: sum(_num(d.get(k)) for d in det) for k in
            ("sueldo", "viaticos", "bono", "he_importe", "infonavit", "desc_nomina",
-            "desc_otra", "desc_retardos", "neto")}
+            "desc_otra", "desc_retardos", "extra_pago", "neto")}
     bajas = [d for d in det if d["baja_fecha"]]
     # totales por clasificacion (cuanto se paga de cada grupo)
     por_clasif = {}
@@ -4926,7 +4949,8 @@ def nomina_resultado(nomina_id):
     caja = {"devengado": 0.0, "infonavit": 0.0, "desc_nomina": 0.0, "desc_retardos": 0.0,
             "se_queda": 0.0, "traspaso": 0.0, "neto": 0.0, "sale": 0.0}
     for d in det:
-        devengado = _num(d["sueldo"]) + _num(d["viaticos"]) + _num(d.get("bono")) + _num(d["he_importe"])
+        devengado = (_num(d["sueldo"]) + _num(d["viaticos"]) + _num(d.get("bono"))
+                     + _num(d["he_importe"]) + _num(d.get("extra_pago")))
         se_queda = _num(d["infonavit"]) + _num(d["desc_nomina"]) + _num(d["desc_retardos"])
         traspaso = _num(d["desc_otra"])
         neto = _num(d["neto"])
@@ -5078,7 +5102,8 @@ def nomina_excel(nomina_id):
            "VIATICOS", "TOTAL HORAS EXTRAS", "IMPORTE HORAS EXTRAS", "INFONAVIT", "DESC. NOMINA",
            "DESC. OTRA", "DESC. RET.", "NETO A PAGAR", "BAJA",
            "TIPO CUENTA", "BANCO", "No. CUENTA", "CLASIFICACION",
-           "SUELDO CONTRATADO", "VIATICOS CONTRATADO", "DEPOSITO A (obs)", "BONO"]
+           "SUELDO CONTRATADO", "VIATICOS CONTRATADO", "DEPOSITO A (obs)", "BONO",
+           "PAGO EXTRA", "MOTIVO PAGO EXTRA"]
     HROW = 4
     for i, t in enumerate(cab, start=1):
         c = ws.cell(HROW, i, t)
@@ -5097,23 +5122,26 @@ def nomina_excel(nomina_id):
                    d["neto"], d["baja_fecha"] or "", tipo_cta, banco_cta, num_cta,
                    d["clasificacion"] or "Sin clasificar",
                    _num(d["sueldo_contratado"]), _num(d["viaticos_contratado"]), d["nota"] or "",
-                   _num(d["bono"])])
+                   _num(d["bono"]), _num(d.get("extra_pago")), d.get("extra_motivo") or ""])
         ws.cell(r, 20).number_format = "@"   # No. de cuenta como texto
         r += 1
-    # totales generales
+    # totales generales (por nombre de columna, para que no se desalineen si cambia el orden)
     ws.append([])
-    fila_tot = ["", "", "TOTALES", "", "", "", ""]
-    for col in ("sueldo", "viaticos", "he_importe", "infonavit", "desc_nomina", "desc_otra", "desc_retardos", "neto"):
-        fila_tot.append(round(sum(_num(d[col]) for d in det), 2))
-    fila_tot.append("")
+    fila_tot = [""] * len(cab)
+    fila_tot[cab.index("NOMBRE")] = "TOTALES"
+    totales_cols = {"SUELDO": "sueldo", "VIATICOS": "viaticos", "IMPORTE HORAS EXTRAS": "he_importe",
+                    "INFONAVIT": "infonavit", "DESC. NOMINA": "desc_nomina", "DESC. OTRA": "desc_otra",
+                    "DESC. RET.": "desc_retardos", "PAGO EXTRA": "extra_pago", "NETO A PAGAR": "neto"}
+    for header, key in totales_cols.items():
+        fila_tot[cab.index(header)] = round(sum(_num(d.get(key)) for d in det), 2)
     ws.append(fila_tot)
-    for col in list(range(8, 17)) + [22, 23, 25]:
+    for col in list(range(8, 17)) + [22, 23, 25, 26]:
         for row in range(HROW + 1, r + 2):
             cell = ws.cell(row, col)
             if isinstance(cell.value, (int, float)):
                 cell.number_format = '#,##0.00'
     ws.column_dimensions["C"].width = 30
-    for i in [2] + list(range(4, 26)):
+    for i in [2] + list(range(4, len(cab) + 1)):
         Lc = openpyxl.utils.get_column_letter(i)
         ws.column_dimensions[Lc].width = max(ws.column_dimensions[Lc].width or 8, 12)
 

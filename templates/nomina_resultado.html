@@ -100,6 +100,7 @@
           <th>Dias</th><th>Faltas</th><th>Ret.</th><th>Vac.</th>
           <th class="text-end">Sueldo</th><th class="text-end">Viaticos</th><th class="text-end">Bono</th>
           <th>Horas extra</th><th class="text-end">Importe H.E.</th>
+          <th class="text-end">Pago extra</th>
           <th class="text-end">INFONAVIT</th><th class="text-end">Desc. nom.</th>
           <th class="text-end">Desc. otra</th><th class="text-end">Desc. ret.</th>
           <th class="text-end">Neto</th>
@@ -120,6 +121,7 @@
           <td class="text-end">{{ d.bono|money }}</td>
           <td class="text-center">{{ d.he_horas|round(1) }}</td>
           <td class="text-end">{{ d.he_importe|money }}</td>
+          <td class="text-end">{{ d.extra_pago|money }}{% if d.extra_motivo %}<br><span class="small text-primary">&rarr; {{ d.extra_motivo }}</span>{% endif %}</td>
           <td class="text-end">{{ d.infonavit|money }}</td>
           <td class="text-end">{{ d.desc_nomina|money }}</td>
           <td class="text-end">{{ d.desc_otra|money }}{% if d.nota %}<br><span class="small text-primary">&rarr; {{ d.nota }}</span>{% endif %}</td>
@@ -136,6 +138,7 @@
           <td class="text-end">{{ tot.bono|money }}</td>
           <td></td>
           <td class="text-end">{{ tot.he_importe|money }}</td>
+          <td class="text-end">{{ tot.extra_pago|money }}</td>
           <td class="text-end">{{ tot.infonavit|money }}</td>
           <td class="text-end">{{ tot.desc_nomina|money }}</td>
           <td class="text-end">{{ tot.desc_otra|money }}</td>
