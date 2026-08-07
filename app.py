@@ -29,7 +29,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.environ.get("DB_PATH", os.path.join(APP_DIR, "poltech.db"))
 
-APP_VERSION = "1.37"   # version del sistema (visible en el menu)
+APP_VERSION = "1.38"   # version del sistema (visible en el menu)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-cambia-esta-clave-en-render")
@@ -4635,7 +4635,8 @@ def asistencia_plantilla():
     jueves = viernes + timedelta(days=6)
 
     activos = db.execute(
-        "SELECT DISTINCT e.cedula, e.nombre, e.primer_apellido, e.segundo_apellido, p.nombre AS puesto "
+        "SELECT DISTINCT e.cedula, e.nombre, e.primer_apellido, e.segundo_apellido, p.nombre AS puesto, "
+        "p.sueldo_semanal, p.viaticos_semanales "
         "FROM empleados e "
         "JOIN empleado_puestos ep ON ep.empleado_id=e.id AND ep.activo=1 "
         "JOIN puestos p ON p.id=ep.puesto_id "
@@ -4715,6 +4716,7 @@ def asistencia_plantilla():
     cab += ["DESCUENTOS\nNOMINA", "DESCUENTOS A\nOTRA CUENTA"]           # AG-AH
     cab += ["OBSERVACIONES\n(a quien se deposita el desc. a otra cuenta)"]  # AI
     cab += ["PAGO EXTRA\n(una sola vez)", "MOTIVO DEL\nPAGO EXTRA"]      # AJ-AK
+    cab += ["SUELDO\nREGISTRADO", "VIATICOS\nREGISTRADOS"]               # AL-AM (solo referencia)
     for i, t in enumerate(cab, start=1):
         hdr(ws.cell(HROW, i, t))
 
@@ -4749,7 +4751,9 @@ def asistencia_plantilla():
         ws.cell(r, 35, "")                                                          # OBSERVACIONES
         ws.cell(r, 36, 0)                                                           # PAGO EXTRA
         ws.cell(r, 37, "")                                                          # MOTIVO PAGO EXTRA
-        for col in range(1, 38):
+        ws.cell(r, 38, _num(emp["sueldo_semanal"]))                                 # SUELDO REGISTRADO (ref)
+        ws.cell(r, 39, _num(emp["viaticos_semanales"]))                             # VIATICOS REGISTRADOS (ref)
+        for col in range(1, 40):
             cell = ws.cell(r, col)
             cell.font = F(size=9); cell.border = borde
             if 4 <= col <= 34 or col == 36: cell.alignment = Alignment(horizontal="center")
@@ -4757,6 +4761,12 @@ def asistencia_plantilla():
         ws.cell(r, 15).fill = PatternFill("solid", fgColor=AMAR)
         ws.cell(r, 36).fill = PatternFill("solid", fgColor=AMAR)
         ws.cell(r, 37).fill = PatternFill("solid", fgColor=AMAR)
+        for col in (38, 39):
+            c38 = ws.cell(r, col)
+            c38.fill = PatternFill("solid", fgColor="E9ECEF")
+            c38.number_format = "#,##0.00"
+            c38.font = F(size=9, italic=True, color="6B7280")
+            c38.alignment = Alignment(horizontal="center")
         r += 1
     ult = r - 1
 
@@ -4781,7 +4791,7 @@ def asistencia_plantilla():
         dv("decimal", "0", f"AJ{HROW+1}:AJ{ult}",
            "Pago extra de una sola vez (no se repite la siguiente semana).", "Pago extra")
 
-    anchos = ([5, 10, 30] + [6]*7 + [7, 8, 6, 6, 12] + [6]*7 + [9, 9, 8] + [6]*7 + [12, 13, 32, 12, 28])
+    anchos = ([5, 10, 30] + [6]*7 + [7, 8, 6, 6, 12] + [6]*7 + [9, 9, 8] + [6]*7 + [12, 13, 32, 12, 28, 13, 14])
     for i, w in enumerate(anchos, start=1):
         ws.column_dimensions[L(i)].width = w
     ws.freeze_panes = "D8"
@@ -4791,6 +4801,7 @@ def asistencia_plantilla():
     ws.cell(lr+1, 3, "RETARDOS: escribe 1 en el dia que llego tarde.  HORAS EXTRAS: horas por dia + TIPO (Factor/Precio) y VALOR.").font = F(size=8, italic=True, color="555555")
     ws.cell(lr+2, 3, "BAJA: escribe la fecha del ultimo dia trabajado si el trabajador causa baja.  El DOMINGO no cuenta para la base de 6 dias.").font = F(size=8, italic=True, color="555555")
     ws.cell(lr+3, 3, "PAGO EXTRA: importe extra de una sola vez para esta semana (no se repite despues). Escribe el motivo junto.").font = F(size=8, italic=True, color="555555")
+    ws.cell(lr+4, 3, "SUELDO/VIATICOS REGISTRADOS: solo de referencia (lo que tiene el trabajador en el catalogo). No se edita ni se sube; el calculo de nomina usa el catalogo directamente.").font = F(size=8, italic=True, color="555555")
 
     # ---- Hoja BAJAS (referencia) ----
     wb2 = wb.create_sheet("Bajas")
@@ -4837,6 +4848,10 @@ def asistencia_plantilla():
         ("   Escribe el importe y el MOTIVO. Solo se paga esta semana, no se repite despues.", False),
         ("   Se autoriza junto con el resto de la nomina al darle 'Autorizar y liberar'.", False),
         ("10. Guarda el archivo y subelo en el sistema (Asistencia semanal > Calcular nomina).", False),
+        ("", False),
+        ("SUELDO REGISTRADO y VIATICOS REGISTRADOS (columnas grises al final): son solo para revisar,", False),
+        ("  muestran lo que cada trabajador tiene dado de alta en el catalogo de sueldos. No se editan;", False),
+        ("  la nomina se calcula siempre con lo que este en el catalogo, no con lo que diga aqui.", False),
     ]
     for i, (txt, boldl) in enumerate(lineas, start=1):
         c = ins.cell(i, 1, txt)
