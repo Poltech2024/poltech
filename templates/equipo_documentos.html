@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h3 class="mb-0">Documentación — {{ eq.cedula }} {{ eq.nombre }}</h3>
+  <a class="btn btn-outline-secondary" href="{{ url_for('equipo_editar', equipo_id=eq.id) }}">Volver al equipo</a>
+</div>
+
+<div class="card p-4 mb-4" style="max-width:720px">
+  <h6 class="text-navy">Subir documento</h6>
+  <form method="post" enctype="multipart/form-data" class="row g-2">
+    <div class="col-md-4">
+      <select name="tipo" class="form-select" required>
+        <option value="">Tipo de documento...</option>
+        {% for t in tipos %}<option>{{ t }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="col-md-5"><input type="file" name="archivo" accept=".jpg,.jpeg,.png,.pdf" class="form-control" required></div>
+    <div class="col-md-3"><button class="btn btn-primary w-100">Subir</button></div>
+    <div class="col-12"><input name="notas" class="form-control" placeholder="Notas (opcional)"></div>
+  </form>
+  <div class="form-text mt-2">Solo imágenes (JPG/PNG) o PDF, escaneados o fotografiados.</div>
+</div>
+
+<div class="card">
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead><tr>
+        <th>Tipo</th><th>Archivo</th><th>Notas</th><th>Subido</th><th></th>
+      </tr></thead>
+      <tbody>
+        {% for d in documentos %}
+        <tr>
+          <td><span class="badge text-bg-secondary">{{ d.tipo }}</span></td>
+          <td class="small">{{ d.archivo_nombre }}</td>
+          <td class="small">{{ d.notas or '-' }}</td>
+          <td class="small">{{ d.subido_en }}<br><span class="text-muted">{{ d.subido_por }}</span></td>
+          <td class="text-end text-nowrap">
+            <a class="btn btn-sm btn-outline-primary py-0 px-2" href="{{ url_for('equipo_documento_descargar', equipo_id=eq.id, doc_id=d.id) }}">Ver/Descargar</a>
+            {% if es_admin %}
+            <form method="post" action="{{ url_for('equipo_documento_eliminar', equipo_id=eq.id, doc_id=d.id) }}" class="d-inline" onsubmit="return confirm('¿Eliminar este documento? No se puede deshacer.');">
+              <button class="btn btn-sm btn-outline-danger py-0 px-2">Eliminar</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="text-center text-muted py-4">Aún no hay documentos subidos para este equipo.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

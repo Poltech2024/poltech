@@ -12,6 +12,7 @@ import os
 import re
 import io
 import json
+import uuid
 import sqlite3
 import smtplib
 import urllib.request
@@ -28,8 +29,10 @@ from werkzeug.security import generate_password_hash, check_password_hash
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.environ.get("DB_PATH", os.path.join(APP_DIR, "poltech.db"))
+EQUIPO_DOCS_DIR = os.environ.get("EQUIPO_DOCS_DIR", os.path.join(os.path.dirname(DB_PATH), "equipo_docs"))
+os.makedirs(EQUIPO_DOCS_DIR, exist_ok=True)
 
-APP_VERSION = "1.40"   # version del sistema (visible en el menu)
+APP_VERSION = "1.41"   # version del sistema (visible en el menu)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-cambia-esta-clave-en-render")
@@ -434,6 +437,17 @@ CREATE TABLE IF NOT EXISTS equipos (
     creado_en TEXT,
     creado_por TEXT
 );
+CREATE TABLE IF NOT EXISTS equipo_documentos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    equipo_id INTEGER NOT NULL,
+    tipo TEXT NOT NULL,
+    archivo_nombre TEXT NOT NULL,
+    archivo_path TEXT NOT NULL,
+    notas TEXT,
+    subido_en TEXT,
+    subido_por TEXT,
+    FOREIGN KEY (equipo_id) REFERENCES equipos(id)
+);
 CREATE TABLE IF NOT EXISTS unidades (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     clave TEXT,
@@ -740,11 +754,11 @@ _ENDPOINTS_PUBLICOS = {"login", "logout", "inicio", "cambiar_password", "static"
 @app.before_request
 def _restringir_gerente_embarques():
     """El rol Gerente de Embarques no tiene ningun acceso a Nominas: solo puede
-    usar las rutas del modulo de Embarques (y las de sesion/inicio, comunes)."""
+    usar las rutas de Embarques y de Herramienta y Equipo (y las de sesion/inicio, comunes)."""
     if session.get("role") != "gerente_embarques":
         return
     ep = request.endpoint or ""
-    if ep in _ENDPOINTS_PUBLICOS or ep.startswith(("embarques", "unidad", "flete")):
+    if ep in _ENDPOINTS_PUBLICOS or ep.startswith(("embarques", "unidad", "flete", "equipo")):
         return
     abort(403)
 
@@ -963,6 +977,10 @@ def embarques_required(f):
 CATEGORIAS_EQUIPO = ["Taller", "Unidad Transporte", "Grua", "Generador", "Perneadora", "Servicio", "Otra"]
 PROPIEDAD_EQUIPO = ["Directa", "En sociedad", "Propiedad de alguien mas"]
 CONDICION_EQUIPO = ["Operable", "Descompuesto", "En reparacion"]
+DOCUMENTOS_TIPOS_EQUIPO = ["Factura", "Pedimento de importacion", "Titulo de propiedad",
+                          "Contrato de compraventa", "Carta de traspaso/endoso",
+                          "Poliza de seguro", "Otro"]
+EXT_DOCUMENTOS_EQUIPO = {".jpg", ".jpeg", ".png", ".pdf"}
 
 def puede_ver_equipo():
     return session.get("role") in ("admin", "gerente_embarques")
@@ -6173,6 +6191,78 @@ def equipo_carga():
         resumen = {"creados": creados, "errores": errores}
         return render_template("equipo_carga.html", resumen=resumen, modulo="equipo")
     return render_template("equipo_carga.html", resumen=None, modulo="equipo")
+
+
+@app.route("/equipo/<int:equipo_id>/documentos", methods=["GET", "POST"])
+@equipo_required
+def equipo_documentos(equipo_id):
+    db = get_db()
+    eq = db.execute("SELECT * FROM equipos WHERE id=?", (equipo_id,)).fetchone()
+    if not eq:
+        abort(404)
+    if request.method == "POST":
+        tipo = request.form.get("tipo", "").strip()
+        archivo = request.files.get("archivo")
+        if tipo not in DOCUMENTOS_TIPOS_EQUIPO:
+            flash("Selecciona un tipo de documento valido.", "danger")
+            return redirect(url_for("equipo_documentos", equipo_id=equipo_id))
+        if not archivo or not archivo.filename:
+            flash("Selecciona un archivo para subir.", "danger")
+            return redirect(url_for("equipo_documentos", equipo_id=equipo_id))
+        ext = os.path.splitext(archivo.filename)[1].lower()
+        if ext not in EXT_DOCUMENTOS_EQUIPO:
+            flash("Solo se aceptan imagenes (JPG/PNG) o PDF.", "danger")
+            return redirect(url_for("equipo_documentos", equipo_id=equipo_id))
+        nombre_guardado = f"equipo{equipo_id}_{uuid.uuid4().hex}{ext}"
+        archivo.save(os.path.join(EQUIPO_DOCS_DIR, nombre_guardado))
+        db.execute(
+            "INSERT INTO equipo_documentos(equipo_id, tipo, archivo_nombre, archivo_path, notas, "
+            "subido_en, subido_por) VALUES(?,?,?,?,?,?,?)",
+            (equipo_id, tipo, archivo.filename, nombre_guardado, request.form.get("notas", "").strip(),
+             datetime.now().isoformat(timespec="seconds"), session.get("nombre")))
+        db.commit()
+        flash("Documento subido.", "success")
+        return redirect(url_for("equipo_documentos", equipo_id=equipo_id))
+    documentos = db.execute(
+        "SELECT * FROM equipo_documentos WHERE equipo_id=? ORDER BY subido_en DESC", (equipo_id,)).fetchall()
+    return render_template("equipo_documentos.html", eq=eq, documentos=documentos,
+                           tipos=DOCUMENTOS_TIPOS_EQUIPO, es_admin=role_rank(session.get("role", "")) >= ADMIN_RANK,
+                           modulo="equipo")
+
+
+@app.route("/equipo/<int:equipo_id>/documentos/<int:doc_id>/descargar")
+@equipo_required
+def equipo_documento_descargar(equipo_id, doc_id):
+    db = get_db()
+    doc = db.execute("SELECT * FROM equipo_documentos WHERE id=? AND equipo_id=?",
+                     (doc_id, equipo_id)).fetchone()
+    if not doc:
+        abort(404)
+    ruta = os.path.join(EQUIPO_DOCS_DIR, doc["archivo_path"])
+    if not os.path.isfile(ruta):
+        flash("El archivo ya no esta disponible en el servidor.", "danger")
+        return redirect(url_for("equipo_documentos", equipo_id=equipo_id))
+    return send_file(ruta, as_attachment=True, download_name=doc["archivo_nombre"])
+
+
+@app.route("/equipo/<int:equipo_id>/documentos/<int:doc_id>/eliminar", methods=["POST"])
+@min_rank(ADMIN_RANK)
+def equipo_documento_eliminar(equipo_id, doc_id):
+    db = get_db()
+    doc = db.execute("SELECT * FROM equipo_documentos WHERE id=? AND equipo_id=?",
+                     (doc_id, equipo_id)).fetchone()
+    if not doc:
+        abort(404)
+    ruta = os.path.join(EQUIPO_DOCS_DIR, doc["archivo_path"])
+    try:
+        if os.path.isfile(ruta):
+            os.remove(ruta)
+    except OSError:
+        pass
+    db.execute("DELETE FROM equipo_documentos WHERE id=?", (doc_id,))
+    db.commit()
+    flash("Documento eliminado.", "success")
+    return redirect(url_for("equipo_documentos", equipo_id=equipo_id))
 
 
 @app.errorhandler(403)
