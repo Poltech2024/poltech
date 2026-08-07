@@ -44,9 +44,9 @@ financieramente a la obra alterna (con un % de indirectos), pero el pago real / 
 caja sigue siendo por la nomina del taller. Es un cobro interno, no un pago duplicado.
 El usuario confirmo que esto es parte de la seccion de Reportes, se atiende mas adelante.
 
-## Fase C - Expediente digital de obra / cliente (pendiente, NUEVA)
-Conforme el sistema crece, agregar un lugar para subir y llevar el expediente de cada
-obra/contrato con la informacion que piden los clientes:
+## Modulo de Obras (pendiente, NUEVA - antes "Fase C - Expediente digital de obra/cliente")
+Nuevo modulo (como Nominas / Embarques / Comercial) dedicado a la gestion de cada obra:
+expediente digital, avances y cobros. Contenido definido hasta ahora:
 - Fianzas
 - Contratos firmados
 - Pagos de IMSS
@@ -59,7 +59,7 @@ Falta definir en una sesion futura: si son solo archivos adjuntos (PDF/Excel) li
 cada obra, o si tambien llevan datos estructurados (montos, fechas de vigencia, folios)
 para poder generar reportes y alertas de vencimiento.
 
-## Comprobantes de pago de nomina (pendiente, NUEVA - va en Fase C)
+## Comprobantes de pago de nomina (pendiente, NUEVA - va en el Modulo de Obras)
 - Subir los PDF de los comprobantes/pagos de nomina (evidencia de que se pago).
 - Generar consultas de CEP (Comprobante Electronico de Pago) de Banxico para corroborar
   que el pago realmente se ejecuto (no solo que se calculo/libero en el sistema).
@@ -96,3 +96,11 @@ con el pago semanal del chofer.
 Hacer reportes de indicadores clave (KPIs) por cada una de las gerencias. Falta definir en
 una sesion futura que gerencias son, que KPIs le importan a cada una y de donde salen los
 datos (nomina, asistencia, catalogo, etc.).
+
+## Modulo Comercial: catalogo de productos + solicitud de precio (pendiente, NUEVA)
+Nuevo modulo (separado de Nomina y Embarques) para el area comercial: un catalogo de
+productos de la empresa donde se pueda generar una solicitud/cotizacion de precio, y
+tambien consultar el peso de cada producto (mismo catalogo, no uno aparte).
+Falta definir en una sesion futura: que productos van en el catalogo (y su peso), quien
+puede solicitar precio (cliente, vendedor, ambos), a quien le llega la solicitud y como
+se autoriza/responde, y si el precio final se conecta con algun reporte o con Embarques.
