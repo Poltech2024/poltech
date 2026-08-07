@@ -32,7 +32,7 @@ DB_PATH = os.environ.get("DB_PATH", os.path.join(APP_DIR, "poltech.db"))
 EQUIPO_DOCS_DIR = os.environ.get("EQUIPO_DOCS_DIR", os.path.join(os.path.dirname(DB_PATH), "equipo_docs"))
 os.makedirs(EQUIPO_DOCS_DIR, exist_ok=True)
 
-APP_VERSION = "1.44"   # version del sistema (visible en el menu)
+APP_VERSION = "1.45"   # version del sistema (visible en el menu)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-cambia-esta-clave-en-render")
@@ -5083,7 +5083,7 @@ def calcular_nomina(db, obra_id, ws, jornada, aplicar_retardos, viernes=None):
         bono_diario = bono_semanal / 6.0
 
         sueldo = round(sueldo_diario * dias_pagables, 2)
-        viaticos = round(viatico_diario * dias_presente, 2)
+        viaticos = round(viatico_diario * dias_pagables, 2)   # incluye dias de vacaciones (V), igual que el sueldo
         bono = round(bono_diario * dias_presente, 2)
         if tipo == "factor":
             he_importe = round(he_horas * (sueldo_diario / jornada) * valor, 2)
