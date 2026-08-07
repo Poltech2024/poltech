@@ -32,7 +32,7 @@ DB_PATH = os.environ.get("DB_PATH", os.path.join(APP_DIR, "poltech.db"))
 EQUIPO_DOCS_DIR = os.environ.get("EQUIPO_DOCS_DIR", os.path.join(os.path.dirname(DB_PATH), "equipo_docs"))
 os.makedirs(EQUIPO_DOCS_DIR, exist_ok=True)
 
-APP_VERSION = "1.45"   # version del sistema (visible en el menu)
+APP_VERSION = "1.46"   # version del sistema (visible en el menu)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-cambia-esta-clave-en-render")
@@ -5600,6 +5600,99 @@ def nomina_excel(nomina_id):
 
     buf = io.BytesIO(); wb.save(buf); buf.seek(0)
     nombre = f"Nomina_{re.sub(r'[^A-Za-z0-9]+','_',n['obra']).strip('_')}_{n['fecha_inicio']}.xlsx"
+    return send_file(buf, as_attachment=True, download_name=nombre,
+                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
+@app.route("/nomina/<int:nomina_id>/reporte-pago")
+@login_required
+def nomina_reporte_pago(nomina_id):
+    """Reporte simplificado para mandar a la contadora: solo lo necesario para pagar
+    (semana, obra, categoria, nombre, importe y datos bancarios). Incluye tambien a las
+    personas de 'Otros pagos semanales' si ya se genero el lote de esta nomina."""
+    db = get_db()
+    n = db.execute("SELECT n.*, o.nombre AS obra FROM nominas n JOIN obras o ON o.id=n.obra_id "
+                   "WHERE n.id=?", (nomina_id,)).fetchone()
+    if not n:
+        abort(404)
+    if not puede_ver_obra(db, n["obra_id"]):
+        abort(403)
+    if (n["estatus"] or "pendiente") != "autorizada":
+        flash("La nomina debe estar autorizada para generar el reporte de pago.", "warning")
+        return redirect(url_for("nomina_resultado", nomina_id=nomina_id))
+
+    det = _con_contratado(db, db.execute(
+        "SELECT * FROM nomina_detalle WHERE nomina_id=? ORDER BY nombre", (nomina_id,)).fetchall())
+    det = _ordenar_por_clasificacion(det, _orden_clasificaciones(db))
+
+    cuentas = {}
+    ids = [d["empleado_id"] for d in det if d["empleado_id"]]
+    if ids:
+        ph = ",".join("?" * len(ids))
+        for c in db.execute(
+                f"SELECT empleado_id, institucion, tipo_cuenta, numero FROM cuentas_bancarias "
+                f"WHERE empleado_id IN ({ph})", ids).fetchall():
+            cuentas.setdefault(c["empleado_id"], c)   # la primera cuenta del trabajador
+
+    semana_txt = f"Semana {n['semana_num']}/{n['anio']} ({n['fecha_inicio']} al {n['fecha_fin']})"
+
+    from openpyxl.styles import Font, PatternFill, Alignment
+    NAVY = "16233C"
+    wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Reporte de pago"
+    ws["A1"] = "POLTECH ACERO Y CONSTRUCCION, S.A. DE C.V."
+    ws["A1"].font = Font(name="Arial", bold=True, size=13, color=NAVY)
+    ws["A2"] = f"REPORTE DE PAGO DE NOMINA  -  {semana_txt}"
+    ws["A2"].font = Font(name="Arial", size=10, italic=True, color="555555")
+
+    cab = ["SEMANA A PAGAR", "OBRA", "CATEGORIA", "NOMBRE", "IMPORTE TOTAL A PAGAR",
+           "BANCO", "TIPO DE CUENTA", "No. CUENTA"]
+    HROW = 4
+    for i, t in enumerate(cab, start=1):
+        c = ws.cell(HROW, i, t)
+        c.font = Font(name="Arial", bold=True, size=9, color="FFFFFF")
+        c.fill = PatternFill("solid", fgColor=NAVY)
+        c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+    total = 0.0
+    for d in det:
+        cta = cuentas.get(d["empleado_id"])
+        importe = _num(d["neto"])
+        ws.append([semana_txt, n["obra"], d["clasificacion"] or "Sin clasificar", d["nombre"],
+                   importe, cta["institucion"] if cta else "",
+                   cta["tipo_cuenta"] if cta else "",
+                   str(cta["numero"]) if cta and cta["numero"] is not None else ""])
+        ws.cell(ws.max_row, 8).number_format = "@"
+        total += importe
+
+    # Otros pagos semanales de esta nomina (si ya se genero el lote)
+    lote = db.execute("SELECT * FROM otros_pagos_lotes WHERE nomina_id=?", (nomina_id,)).fetchone()
+    if lote:
+        for it in sorted(json.loads(lote["detalle_json"] or "[]"), key=lambda x: x.get("nombre") or ""):
+            monto = _num(it.get("monto"))
+            ws.append([semana_txt, "", "Otros pagos semanales", it.get("nombre", ""),
+                       monto, it.get("banco", ""), it.get("tipo_cuenta", ""), it.get("numero_cuenta", "")])
+            ws.cell(ws.max_row, 8).number_format = "@"
+            total += monto
+
+    ws.append(["", "", "", "TOTAL A PAGAR", round(total, 2), "", "", ""])
+    fila_tot = ws.max_row
+    ws.cell(fila_tot, 4).font = Font(name="Arial", bold=True)
+    ws.cell(fila_tot, 5).font = Font(name="Arial", bold=True)
+
+    for row in range(HROW + 1, fila_tot + 1):
+        cell = ws.cell(row, 5)
+        if isinstance(cell.value, (int, float)):
+            cell.number_format = '#,##0.00'
+
+    ws.column_dimensions["A"].width = 32
+    ws.column_dimensions["B"].width = 22
+    ws.column_dimensions["C"].width = 20
+    ws.column_dimensions["D"].width = 30
+    for L in ("E", "F", "G", "H"):
+        ws.column_dimensions[L].width = 18
+
+    buf = io.BytesIO(); wb.save(buf); buf.seek(0)
+    nombre = f"ReportePago_{re.sub(r'[^A-Za-z0-9]+','_',n['obra']).strip('_')}_{n['fecha_inicio']}.xlsx"
     return send_file(buf, as_attachment=True, download_name=nombre,
                      mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
