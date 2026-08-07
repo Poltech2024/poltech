@@ -29,7 +29,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.environ.get("DB_PATH", os.path.join(APP_DIR, "poltech.db"))
 
-APP_VERSION = "1.34"   # version del sistema (visible en el menu)
+APP_VERSION = "1.35"   # version del sistema (visible en el menu)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-cambia-esta-clave-en-render")
@@ -1898,7 +1898,7 @@ def login():
             session["nombre"] = row["nombre"]
             session["role"] = row["role"]
             session["username"] = row["username"]
-            return redirect(url_for("dashboard"))
+            return redirect(url_for("inicio"))
         flash("Usuario o contrasena incorrectos.", "danger")
     return render_template("login.html")
 
@@ -1911,6 +1911,13 @@ def logout():
 # Dashboard
 # ---------------------------------------------------------------------------
 @app.route("/")
+@login_required
+def inicio():
+    """Pantalla de inicio: elegir modulo (hoy solo Nominas; Embarques proximamente)."""
+    return render_template("inicio.html", hide_sidebar=True)
+
+
+@app.route("/nominas")
 @login_required
 def dashboard():
     db = get_db()

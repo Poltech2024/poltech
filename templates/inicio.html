@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Inicio - Poltech{% endblock %}
+{% block content %}
+<div class="text-center mb-4">
+  <h3 class="mb-1">&iquest;A d&oacute;nde quieres entrar?</h3>
+  <p class="text-muted">Elige el m&oacute;dulo con el que vas a trabajar.</p>
+</div>
+
+<div class="row g-4 justify-content-center">
+  <div class="col-md-5 col-lg-4">
+    <a href="{{ url_for('dashboard') }}" class="text-decoration-none">
+      <div class="card p-4 h-100 shadow-sm modulo-card">
+        <div class="fs-1 mb-2">&#128188;</div>
+        <h4 class="text-navy mb-1">N&oacute;minas</h4>
+        <p class="text-muted small mb-0">
+          Personal, asistencia y c&aacute;lculo de n&oacute;mina, vacaciones, reportes y
+          configuraci&oacute;n de obras y cat&aacute;logo de sueldos.
+        </p>
+      </div>
+    </a>
+  </div>
+  <div class="col-md-5 col-lg-4">
+    <div class="card p-4 h-100 modulo-card modulo-card-disabled">
+      <div class="fs-1 mb-2">&#128666;</div>
+      <h4 class="text-muted mb-1">Embarques</h4>
+      <p class="text-muted small mb-0">Fletes, env&iacute;os y log&iacute;stica.</p>
+      <span class="badge text-bg-secondary mt-2 align-self-start">Pr&oacute;ximamente</span>
+    </div>
+  </div>
+</div>
+
+<style>
+  .modulo-card{ border:1px solid #e3e6ea; border-radius:.75rem; transition:transform .12s, box-shadow .12s; }
+  a:hover .modulo-card{ transform:translateY(-3px); box-shadow:0 .5rem 1rem rgba(0,0,0,.08); border-color:var(--azul); }
+  .modulo-card-disabled{ opacity:.6; cursor:not-allowed; }
+</style>
+{% endblock %}
