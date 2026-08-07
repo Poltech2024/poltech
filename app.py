@@ -32,7 +32,7 @@ DB_PATH = os.environ.get("DB_PATH", os.path.join(APP_DIR, "poltech.db"))
 EQUIPO_DOCS_DIR = os.environ.get("EQUIPO_DOCS_DIR", os.path.join(os.path.dirname(DB_PATH), "equipo_docs"))
 os.makedirs(EQUIPO_DOCS_DIR, exist_ok=True)
 
-APP_VERSION = "1.43"   # version del sistema (visible en el menu)
+APP_VERSION = "1.44"   # version del sistema (visible en el menu)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-cambia-esta-clave-en-render")
@@ -5338,12 +5338,38 @@ def nomina_eliminar(nomina_id):
         abort(404)
     if not puede_ver_obra(db, n["obra_id"]):
         abort(403)
+    # Revertir las bajas que esta nomina haya causado al calcularse (columna BAJA
+    # del Excel de asistencia): si el empleado sigue de baja con exactamente la
+    # misma fecha que registro esta nomina (nadie mas lo volvio a tocar despues),
+    # se regresa a activo y se reactiva su asignacion en esta obra. Sin esto, borrar
+    # una nomina para corregir un error dejaba al trabajador "atorado" de baja y
+    # ya no aparecia al volver a subir/calcular.
+    revertidos = []
+    for d in db.execute(
+            "SELECT empleado_id, baja_fecha FROM nomina_detalle "
+            "WHERE nomina_id=? AND baja_fecha IS NOT NULL AND baja_fecha<>''", (nomina_id,)).fetchall():
+        emp = db.execute(
+            "SELECT id, cedula, nombre, primer_apellido, estatus, fecha_baja, puesto_id "
+            "FROM empleados WHERE id=?", (d["empleado_id"],)).fetchone()
+        if emp and emp["estatus"] == "baja" and emp["fecha_baja"] == d["baja_fecha"]:
+            db.execute("UPDATE empleados SET estatus='activo', fecha_baja=NULL, motivo_baja=NULL WHERE id=?",
+                       (emp["id"],))
+            asegurar_puesto_asignado(db, emp["id"], emp["puesto_id"])
+            registrar_bitacora(db, "Reversion de baja (nomina eliminada)",
+                               f"{emp['nombre']} {emp['primer_apellido']} (cedula {emp['cedula']}) "
+                               f"vuelve a activo; su baja del {d['baja_fecha']} se habia registrado "
+                               f"al calcular la nomina {nomina_id} que se esta eliminando.")
+            revertidos.append(f"{emp['nombre']} {emp['primer_apellido']}")
     db.execute("DELETE FROM nomina_detalle WHERE nomina_id=?", (nomina_id,))
     db.execute("DELETE FROM nominas WHERE id=?", (nomina_id,))
     registrar_bitacora(db, "Eliminacion de nomina",
                        f"Nomina {nomina_id} (obra {n['obra_id']}, semana {n['fecha_inicio']})")
     db.commit()
-    flash("Nomina eliminada.", "success")
+    if revertidos:
+        flash(f"Nomina eliminada. Tambien se revirtio la baja de: {', '.join(revertidos)} "
+              "(vuelven a estatus activo porque su baja se habia registrado en esta nomina).", "warning")
+    else:
+        flash("Nomina eliminada.", "success")
     return redirect(url_for("nomina"))
 
 
