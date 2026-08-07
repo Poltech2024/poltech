@@ -29,7 +29,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.environ.get("DB_PATH", os.path.join(APP_DIR, "poltech.db"))
 
-APP_VERSION = "1.36"   # version del sistema (visible en el menu)
+APP_VERSION = "1.37"   # version del sistema (visible en el menu)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-cambia-esta-clave-en-render")
@@ -2297,18 +2297,24 @@ def catalogo_categorias_plantilla():
         flash("Selecciona una obra valida.", "warning")
         return redirect(url_for("catalogo"))
     obra = db.execute("SELECT * FROM obras WHERE id=?", (obra_id,)).fetchone()
+    solo_pendientes = request.args.get("solo_pendientes") == "1"
 
+    filtro_sueldo = " AND p.sueldo_semanal=0" if solo_pendientes else ""
     empleados = db.execute(
         "SELECT DISTINCT e.id, e.cedula, e.nombre, e.primer_apellido, e.segundo_apellido, "
         "p.nombre AS puesto_actual, p.sueldo_semanal AS sueldo_actual "
         "FROM empleados e "
         "JOIN empleado_puestos ep ON ep.empleado_id=e.id AND ep.activo=1 "
         "JOIN puestos p ON p.id=ep.puesto_id "
-        "WHERE p.obra_id=? AND e.estatus='activo' "
+        f"WHERE p.obra_id=? AND e.estatus='activo'{filtro_sueldo} "
         "ORDER BY e.primer_apellido, e.nombre", (obra_id,)).fetchall()
     puestos = db.execute(
         "SELECT nombre, sueldo_semanal, viaticos_semanales FROM puestos "
         "WHERE obra_id=? AND activo=1 ORDER BY nombre", (obra_id,)).fetchall()
+
+    if solo_pendientes and not empleados:
+        flash("No hay trabajadores pendientes de categoria (sueldo en $0) en esa obra.", "info")
+        return redirect(url_for("catalogo_categorias_carga"))
 
     from openpyxl.styles import Font, PatternFill
     from openpyxl.workbook.defined_name import DefinedName
@@ -2340,7 +2346,8 @@ def catalogo_categorias_plantilla():
 
     buf = io.BytesIO(); wb.save(buf); buf.seek(0)
     obra_limpia = re.sub(r"[^0-9A-Za-zÁÉÍÓÚÑáéíóúñ ._-]+", "", obra["nombre"]).strip()
-    return send_file(buf, as_attachment=True, download_name=f"Categorias {obra_limpia}.xlsx",
+    sufijo = " Pendientes" if solo_pendientes else ""
+    return send_file(buf, as_attachment=True, download_name=f"Categorias {obra_limpia}{sufijo}.xlsx",
                      mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 
