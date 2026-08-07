@@ -61,6 +61,13 @@
     {% if current_user.id and not hide_sidebar %}
     <div class="col-lg-2 mb-3 sidebar">
       <a href="{{ url_for('inicio') }}">&larr; Modulos</a>
+
+      {% if modulo == 'embarques' %}
+      <a href="{{ url_for('embarques_inicio') }}">Inicio</a>
+      <a href="{{ url_for('unidades') }}">Catalogo de unidades</a>
+      <a href="{{ url_for('flete_cotizar') }}">Cotizar flete</a>
+      <a href="{{ url_for('flete_cotizaciones') }}">Historial de cotizaciones</a>
+      {% else %}
       <a href="{{ url_for('dashboard') }}">Inicio</a>
 
       <div class="group-label" data-target="grupo-personal">Personal <span class="chevron">&rsaquo;</span></div>
@@ -94,6 +101,7 @@
         {% if current_user.rank >= 100 %}<a href="{{ url_for('parametros') }}">Parametros</a>{% endif %}
         {% if current_user.rank >= 100 %}<a href="{{ url_for('otros_pagos') }}">Otros pagos semanales</a>{% endif %}
       </div>
+      {% endif %}
 
       <div class="text-muted small mt-3 ps-2">Version {{ APP_VERSION }}</div>
     </div>

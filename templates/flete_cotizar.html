@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h3 class="mb-0">Cotizar flete</h3>
+  <a class="btn btn-outline-secondary" href="{{ url_for('flete_cotizaciones') }}">Historial de cotizaciones</a>
+</div>
+
+{% if not unidades %}
+<div class="alert alert-warning">Primero da de alta al menos una <a href="{{ url_for('unidades') }}">unidad activa</a> en el catálogo.</div>
+{% endif %}
+
+<div class="row g-4">
+  <div class="col-lg-6">
+    <form method="post" class="card p-4">
+      <h6 class="text-navy">Datos del viaje</h6>
+      <div class="row g-2 mb-2">
+        <div class="col-12"><label class="form-label small mb-1">Unidad</label>
+          <select name="unidad_id" class="form-select" required>
+            <option value="">Selecciona la unidad...</option>
+            {% for u in unidades %}
+            <option value="{{ u.id }}">{{ u.clave or u.tipo }} — {{ u.tipo }} ({{ u.rendimiento_km_l }} km/l)</option>
+            {% endfor %}
+          </select></div>
+        <div class="col-md-6"><label class="form-label small mb-1">Cliente</label>
+          <input name="cliente" class="form-control" value="{{ datos.get('cliente','') }}"></div>
+        <div class="col-md-3"><label class="form-label small mb-1">Origen</label>
+          <input name="origen" class="form-control" value="{{ datos.get('origen','') }}"></div>
+        <div class="col-md-3"><label class="form-label small mb-1">Destino</label>
+          <input name="destino" class="form-control" value="{{ datos.get('destino','') }}"></div>
+      </div>
+
+      <div class="row g-2 mb-2">
+        <div class="col-md-6"><label class="form-label small mb-1">Kilómetros a recorrer (viaje redondo) *</label>
+          <input name="km_recorrer" type="number" step="0.01" class="form-control" value="{{ datos.get('km_recorrer','') }}" required></div>
+        <div class="col-md-6"><label class="form-label small mb-1">Días de traslado</label>
+          <input name="dias_traslado" type="number" step="0.5" class="form-control" value="{{ datos.get('dias_traslado','') }}">
+          <div class="form-text">Ej. viaje de 600-1000 km de ida: 1.5 días ida + 1.5 vuelta = 3.</div></div>
+      </div>
+
+      <div class="row g-2 mb-2">
+        <div class="col-md-6"><label class="form-label small mb-1">Costo por litro de diesel *</label>
+          <input name="costo_litro_diesel" type="number" step="0.01" class="form-control" value="{{ datos.get('costo_litro_diesel','') }}" required></div>
+        <div class="col-md-6"><label class="form-label small mb-1">Gasto de autopista/casetas</label>
+          <input name="gasto_autopista" type="number" step="0.01" class="form-control" value="{{ datos.get('gasto_autopista','') }}"></div>
+      </div>
+
+      <div class="row g-2 mb-3">
+        <div class="col-md-6"><label class="form-label small mb-1">Gasto de administración (fijo)</label>
+          <input name="gasto_admon" type="number" step="0.01" class="form-control" value="{{ datos.get('gasto_admon','') }}"></div>
+        <div class="col-md-6"><label class="form-label small mb-1">Precio de venta por km (lo que se cobra) *</label>
+          <input name="precio_venta_km" type="number" step="0.01" class="form-control" value="{{ datos.get('precio_venta_km','') }}" required></div>
+      </div>
+
+      <button class="btn btn-primary" {{ 'disabled' if not unidades }}>Calcular y guardar cotización</button>
+    </form>
+  </div>
+
+  <div class="col-lg-6">
+    {% if resultado %}
+    <div class="card p-4">
+      <h6 class="text-navy">Resultado — {{ resultado.unidad.clave or resultado.unidad.tipo }} ({{ resultado.km }} km)</h6>
+      <table class="table table-sm mb-0">
+        <tbody>
+          <tr><td>Litros a consumir</td><td class="text-end">{{ resultado.litros_consumir }} L</td></tr>
+          <tr><td>Litros ralentí (10%)</td><td class="text-end">{{ resultado.litros_ralenti }} L</td></tr>
+          <tr><td>Total diesel a consumir</td><td class="text-end">{{ resultado.total_diesel }} L</td></tr>
+          <tr><td>Gasto total diesel</td><td class="text-end">{{ resultado.gasto_diesel|money }}</td></tr>
+          <tr><td>Comisión al operador</td><td class="text-end">{{ resultado.comision_operador|money }}</td></tr>
+          <tr><td>Viáticos ($1,000/día)</td><td class="text-end">{{ resultado.viaticos|money }}</td></tr>
+          <tr class="table-light fw-bold"><td>Gastos totales del viaje</td><td class="text-end">{{ resultado.gastos_totales|money }}</td></tr>
+          <tr><td>Costo por km directo</td><td class="text-end">{{ resultado.costo_km_directo|money }}</td></tr>
+          <tr class="fw-bold text-navy"><td>Precio del flete (a cobrar)</td><td class="text-end">{{ resultado.precio_flete|money }}</td></tr>
+          <tr class="{{ 'text-success' if resultado.utilidad >= 0 else 'text-danger' }} fw-bold">
+            <td>Utilidad estimada</td><td class="text-end">{{ resultado.utilidad|money }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="card p-4 text-muted text-center">
+      Llena el formulario y calcula para ver el desglose del costo y el precio del flete.
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

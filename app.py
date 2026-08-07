@@ -29,7 +29,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.environ.get("DB_PATH", os.path.join(APP_DIR, "poltech.db"))
 
-APP_VERSION = "1.35"   # version del sistema (visible en el menu)
+APP_VERSION = "1.36"   # version del sistema (visible en el menu)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-cambia-esta-clave-en-render")
@@ -39,9 +39,10 @@ app.config["MAX_CONTENT_LENGTH"] = 6 * 1024 * 1024  # 6 MB por archivo subido
 # Roles y jerarquia (a mayor numero, mas permisos)
 # ---------------------------------------------------------------------------
 ROLES = {
-    "admin":           ("Administrador", 100),
-    "superintendente": ("Superintendente de obra", 70),
-    "residente":       ("Residente", 30),
+    "admin":            ("Administrador", 100),
+    "superintendente":  ("Superintendente de obra", 70),
+    "residente":        ("Residente", 30),
+    "gerente_embarques": ("Gerente de Embarques", 0),
 }
 GERENTE_RANK = 70  # de gerente de obra hacia arriba
 ADMIN_RANK = 100   # solo administrador
@@ -415,6 +416,53 @@ CREATE TABLE IF NOT EXISTS reingreso_solicitudes (
     FOREIGN KEY (empleado_id) REFERENCES empleados(id),
     FOREIGN KEY (puesto_id_nuevo) REFERENCES puestos(id)
 );
+CREATE TABLE IF NOT EXISTS unidades (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    clave TEXT,
+    marca TEXT,
+    modelo TEXT,
+    anio INTEGER,
+    tipo TEXT NOT NULL,
+    capacidad_toneladas REAL DEFAULT 0,
+    rendimiento_km_l REAL NOT NULL DEFAULT 0,
+    combustible TEXT DEFAULT 'Diesel',
+    placas TEXT,
+    numero_economico TEXT,
+    vigencia_seguro TEXT,
+    vigencia_verificacion TEXT,
+    estatus TEXT DEFAULT 'Activa',
+    creado_en TEXT,
+    creado_por TEXT
+);
+CREATE TABLE IF NOT EXISTS unidad_checklist (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    unidad_id INTEGER NOT NULL,
+    item TEXT NOT NULL,
+    estatus TEXT DEFAULT 'Pendiente',
+    notas TEXT,
+    actualizado_en TEXT,
+    actualizado_por TEXT,
+    FOREIGN KEY (unidad_id) REFERENCES unidades(id)
+);
+CREATE TABLE IF NOT EXISTS fletes_cotizaciones (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    unidad_id INTEGER,
+    cliente TEXT,
+    origen TEXT,
+    destino TEXT,
+    km_recorrer REAL NOT NULL,
+    dias_traslado REAL NOT NULL DEFAULT 0,
+    costo_litro_diesel REAL NOT NULL DEFAULT 0,
+    gasto_autopista REAL DEFAULT 0,
+    gasto_admon REAL DEFAULT 0,
+    precio_venta_km REAL NOT NULL DEFAULT 0,
+    litros_consumir REAL, litros_ralenti REAL, total_diesel REAL,
+    gasto_diesel REAL, comision_operador REAL, viaticos REAL,
+    gastos_totales REAL, costo_km_directo REAL, precio_flete REAL, utilidad REAL,
+    creado_en TEXT,
+    creado_por TEXT,
+    FOREIGN KEY (unidad_id) REFERENCES unidades(id)
+);
 CREATE TABLE IF NOT EXISTS vacaciones_solicitudes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     empleado_id INTEGER NOT NULL,
@@ -663,6 +711,20 @@ def min_rank(rank):
         return wrapper
     return deco
 
+
+_ENDPOINTS_PUBLICOS = {"login", "logout", "inicio", "cambiar_password", "static"}
+
+@app.before_request
+def _restringir_gerente_embarques():
+    """El rol Gerente de Embarques no tiene ningun acceso a Nominas: solo puede
+    usar las rutas del modulo de Embarques (y las de sesion/inicio, comunes)."""
+    if session.get("role") != "gerente_embarques":
+        return
+    ep = request.endpoint or ""
+    if ep in _ENDPOINTS_PUBLICOS or ep.startswith(("embarques", "unidad", "flete")):
+        return
+    abort(403)
+
 @app.context_processor
 def inject_user():
     return {
@@ -838,6 +900,83 @@ def vacaciones_resumen(db, emp):
     return {"periodos": periodos, "total_derecho": total_derecho,
             "total_tomado": tomados_total, "total_disponible": total_derecho - tomados_total,
             "ajuste": ajuste, "autorizadas": autorizadas}
+
+
+# ---------------------------------------------------------------------------
+# Embarques: catalogo de unidades y cotizador de fletes
+# ---------------------------------------------------------------------------
+TIPOS_UNIDAD = ["Camioneta", "Torton", "Trailer"]
+
+CHECKLIST_BASE = ["Extintor", "Botiquin", "Triangulos de seguridad",
+                  "Llanta de refaccion", "Cinturones de seguridad", "Cuñas/calzas"]
+CHECKLIST_CARGA = ["Kit de sujecion (cadenas/correas)", "Lona/cortinas de carga",
+                   "GPS/rastreo satelital"]
+CHECKLIST_ITEMS = {
+    "Camioneta": CHECKLIST_BASE,
+    "Torton": CHECKLIST_BASE + CHECKLIST_CARGA,
+    "Trailer": CHECKLIST_BASE + CHECKLIST_CARGA + ["Quinta rueda / kingpin en buen estado"],
+}
+
+def puede_ver_nominas():
+    return session.get("role") != "gerente_embarques"
+
+def puede_ver_embarques():
+    return session.get("role") in ("admin", "gerente_embarques")
+
+def embarques_required(f):
+    @wraps(f)
+    def wrapper(*a, **k):
+        if not session.get("user_id"):
+            return redirect(url_for("login"))
+        if not puede_ver_embarques():
+            abort(403)
+        return f(*a, **k)
+    return wrapper
+
+
+# (limite_1, limite_2, tarifa_1, tarifa_2) del viaje redondo, en pesos por km:
+# hasta limite_1 no se paga; de limite_1 a limite_2 se paga tarifa_1 x km;
+# arriba de limite_2 se paga tarifa_2 x km (aplica a TODO el recorrido, no por tramos).
+COMISION_OPERADOR = {
+    "Trailer":   (100, 700, 2.00, 1.75),
+    "Torton":    (200, 1400, 1.75, 1.50),
+    "Camioneta": (200, 1400, 1.50, 1.75),
+}
+
+def comision_operador(tipo_unidad, km):
+    conf = COMISION_OPERADOR.get(tipo_unidad)
+    if not conf or km <= 0:
+        return 0.0
+    lim1, lim2, t1, t2 = conf
+    if km <= lim1:
+        return 0.0
+    if km <= lim2:
+        return round(km * t1, 2)
+    return round(km * t2, 2)
+
+def calcular_flete(unidad, km, dias_traslado, costo_litro, gasto_autopista, gasto_admon, precio_venta_km):
+    """Replica el calculo de costo/precio de un viaje (ver hoja de calculo del
+    usuario): diesel + 10% de ralenti, comision al operador por tramos de km
+    segun el tipo de unidad, viaticos de $1,000/dia, y un gasto de admon fijo."""
+    rendimiento = _num(unidad["rendimiento_km_l"]) or 0
+    litros_consumir = (km / rendimiento) if rendimiento else 0.0
+    litros_ralenti = litros_consumir * 0.10
+    total_diesel = litros_consumir + litros_ralenti
+    gasto_diesel = total_diesel * costo_litro
+    comision = comision_operador(unidad["tipo"], km)
+    viaticos = 1000.0 * _num(dias_traslado)
+    gastos_totales = gasto_diesel + _num(gasto_autopista) + comision + viaticos + _num(gasto_admon)
+    costo_km_directo = (gastos_totales / km) if km else 0.0
+    precio_flete = _num(precio_venta_km) * km
+    utilidad = precio_flete - gastos_totales
+    r = lambda v: round(v, 2)
+    return {
+        "litros_consumir": r(litros_consumir), "litros_ralenti": r(litros_ralenti),
+        "total_diesel": r(total_diesel), "gasto_diesel": r(gasto_diesel),
+        "comision_operador": r(comision), "viaticos": r(viaticos),
+        "gastos_totales": r(gastos_totales), "costo_km_directo": r(costo_km_directo),
+        "precio_flete": r(precio_flete), "utilidad": r(utilidad),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1913,8 +2052,9 @@ def logout():
 @app.route("/")
 @login_required
 def inicio():
-    """Pantalla de inicio: elegir modulo (hoy solo Nominas; Embarques proximamente)."""
-    return render_template("inicio.html", hide_sidebar=True)
+    """Pantalla de inicio: elegir modulo, segun a lo que el usuario tenga acceso."""
+    return render_template("inicio.html", hide_sidebar=True,
+                           puede_nominas=puede_ver_nominas(), puede_embarques=puede_ver_embarques())
 
 
 @app.route("/nominas")
@@ -5568,6 +5708,184 @@ def parametros():
     datos = {k: get_param(db, k) for k in claves}
     return render_template("parametros.html", p=datos,
                            propuesta=propuesta_salario_alta(db))
+
+
+# ---------------------------------------------------------------------------
+# Embarques
+# ---------------------------------------------------------------------------
+@app.route("/embarques")
+@embarques_required
+def embarques_inicio():
+    db = get_db()
+    stats = {
+        "unidades": db.execute("SELECT COUNT(*) FROM unidades WHERE estatus='Activa'").fetchone()[0],
+        "cotizaciones_mes": db.execute(
+            "SELECT COUNT(*) FROM fletes_cotizaciones WHERE creado_en >= ?",
+            ((date.today().replace(day=1)).isoformat(),)).fetchone()[0],
+    }
+    return render_template("embarques_inicio.html", stats=stats, modulo="embarques")
+
+
+@app.route("/unidades", methods=["GET", "POST"])
+@embarques_required
+def unidades():
+    db = get_db()
+    if request.method == "POST":
+        clave = request.form.get("clave", "").strip()
+        tipo = request.form.get("tipo", "")
+        if tipo not in TIPOS_UNIDAD:
+            flash("Selecciona un tipo de unidad valido.", "danger")
+            return redirect(url_for("unidades"))
+        rendimiento = float(request.form.get("rendimiento_km_l") or 0)
+        if rendimiento <= 0:
+            flash("El rendimiento (km/litro) debe ser mayor a 0.", "danger")
+            return redirect(url_for("unidades"))
+        cur = db.execute(
+            "INSERT INTO unidades(clave, marca, modelo, anio, tipo, capacidad_toneladas, "
+            "rendimiento_km_l, combustible, placas, numero_economico, vigencia_seguro, "
+            "vigencia_verificacion, estatus, creado_en, creado_por) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (clave, request.form.get("marca", "").strip(), request.form.get("modelo", "").strip(),
+             int(request.form.get("anio") or 0) or None, tipo,
+             float(request.form.get("capacidad_toneladas") or 0), rendimiento,
+             request.form.get("combustible", "Diesel"), request.form.get("placas", "").strip(),
+             request.form.get("numero_economico", "").strip(),
+             request.form.get("vigencia_seguro", ""), request.form.get("vigencia_verificacion", ""),
+             "Activa", date.today().isoformat(), session.get("nombre")))
+        unidad_id = cur.lastrowid
+        for item in CHECKLIST_ITEMS.get(tipo, CHECKLIST_BASE):
+            db.execute("INSERT INTO unidad_checklist(unidad_id, item, estatus) VALUES(?,?,'Pendiente')",
+                       (unidad_id, item))
+        db.commit()
+        flash(f"Unidad '{clave or tipo}' agregada al catalogo.", "success")
+        return redirect(url_for("unidades"))
+
+    filas = db.execute("SELECT * FROM unidades ORDER BY estatus DESC, tipo, clave").fetchall()
+    return render_template("unidades_list.html", unidades=filas, tipos=TIPOS_UNIDAD, modulo="embarques")
+
+
+@app.route("/unidad/<int:unidad_id>/editar", methods=["GET", "POST"])
+@embarques_required
+def unidad_editar(unidad_id):
+    db = get_db()
+    u = db.execute("SELECT * FROM unidades WHERE id=?", (unidad_id,)).fetchone()
+    if not u:
+        abort(404)
+    if request.method == "POST":
+        rendimiento = float(request.form.get("rendimiento_km_l") or 0)
+        if rendimiento <= 0:
+            flash("El rendimiento (km/litro) debe ser mayor a 0.", "danger")
+            return redirect(url_for("unidad_editar", unidad_id=unidad_id))
+        db.execute(
+            "UPDATE unidades SET clave=?, marca=?, modelo=?, anio=?, capacidad_toneladas=?, "
+            "rendimiento_km_l=?, combustible=?, placas=?, numero_economico=?, vigencia_seguro=?, "
+            "vigencia_verificacion=?, estatus=? WHERE id=?",
+            (request.form.get("clave", "").strip(), request.form.get("marca", "").strip(),
+             request.form.get("modelo", "").strip(), int(request.form.get("anio") or 0) or None,
+             float(request.form.get("capacidad_toneladas") or 0), rendimiento,
+             request.form.get("combustible", "Diesel"), request.form.get("placas", "").strip(),
+             request.form.get("numero_economico", "").strip(),
+             request.form.get("vigencia_seguro", ""), request.form.get("vigencia_verificacion", ""),
+             request.form.get("estatus", "Activa"), unidad_id))
+        db.commit()
+        flash("Unidad actualizada.", "success")
+        return redirect(url_for("unidades"))
+    return render_template("unidad_form.html", u=u, tipos=TIPOS_UNIDAD, modulo="embarques")
+
+
+@app.route("/unidad/<int:unidad_id>/checklist", methods=["GET", "POST"])
+@embarques_required
+def unidad_checklist(unidad_id):
+    db = get_db()
+    u = db.execute("SELECT * FROM unidades WHERE id=?", (unidad_id,)).fetchone()
+    if not u:
+        abort(404)
+    if request.method == "POST":
+        for it in db.execute("SELECT id FROM unidad_checklist WHERE unidad_id=?", (unidad_id,)).fetchall():
+            estatus = request.form.get(f"estatus_{it['id']}", "Pendiente")
+            notas = request.form.get(f"notas_{it['id']}", "").strip()
+            db.execute("UPDATE unidad_checklist SET estatus=?, notas=?, actualizado_en=?, "
+                       "actualizado_por=? WHERE id=?",
+                       (estatus, notas, date.today().isoformat(), session.get("nombre"), it["id"]))
+        db.commit()
+        flash("Checklist actualizado.", "success")
+        return redirect(url_for("unidad_checklist", unidad_id=unidad_id))
+    items = db.execute("SELECT * FROM unidad_checklist WHERE unidad_id=? ORDER BY id", (unidad_id,)).fetchall()
+    return render_template("unidad_checklist.html", u=u, items=items, modulo="embarques")
+
+
+@app.route("/cotizar-flete", methods=["GET", "POST"])
+@embarques_required
+def flete_cotizar():
+    db = get_db()
+    unidades_l = db.execute("SELECT * FROM unidades WHERE estatus='Activa' ORDER BY tipo, clave").fetchall()
+    resultado = None
+    if request.method == "POST":
+        unidad = db.execute("SELECT * FROM unidades WHERE id=?", (request.form.get("unidad_id"),)).fetchone()
+        errores = []
+        if not unidad:
+            errores.append("Selecciona una unidad valida.")
+        try:
+            km = float(request.form.get("km_recorrer") or 0)
+        except ValueError:
+            km = 0
+        if km <= 0:
+            errores.append("Los kilometros a recorrer (viaje redondo) deben ser mayores a 0.")
+        try:
+            costo_litro = float(request.form.get("costo_litro_diesel") or 0)
+        except ValueError:
+            costo_litro = 0
+        if costo_litro <= 0:
+            errores.append("Captura el costo por litro de diesel.")
+        try:
+            precio_venta_km = float(request.form.get("precio_venta_km") or 0)
+        except ValueError:
+            precio_venta_km = 0
+        if precio_venta_km <= 0:
+            errores.append("Captura el precio de venta por kilometro.")
+        dias_traslado = float(request.form.get("dias_traslado") or 0)
+        gasto_autopista = float(request.form.get("gasto_autopista") or 0)
+        gasto_admon = float(request.form.get("gasto_admon") or 0)
+        cliente = request.form.get("cliente", "").strip()
+        origen = request.form.get("origen", "").strip()
+        destino = request.form.get("destino", "").strip()
+
+        if errores:
+            for e in errores:
+                flash(e, "danger")
+            return render_template("flete_cotizar.html", unidades=unidades_l, resultado=None,
+                                   datos=request.form, modulo="embarques")
+
+        calc = calcular_flete(unidad, km, dias_traslado, costo_litro, gasto_autopista,
+                              gasto_admon, precio_venta_km)
+        db.execute(
+            "INSERT INTO fletes_cotizaciones(unidad_id, cliente, origen, destino, km_recorrer, "
+            "dias_traslado, costo_litro_diesel, gasto_autopista, gasto_admon, precio_venta_km, "
+            "litros_consumir, litros_ralenti, total_diesel, gasto_diesel, comision_operador, "
+            "viaticos, gastos_totales, costo_km_directo, precio_flete, utilidad, creado_en, creado_por) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (unidad["id"], cliente, origen, destino, km, dias_traslado, costo_litro, gasto_autopista,
+             gasto_admon, precio_venta_km, calc["litros_consumir"], calc["litros_ralenti"],
+             calc["total_diesel"], calc["gasto_diesel"], calc["comision_operador"], calc["viaticos"],
+             calc["gastos_totales"], calc["costo_km_directo"], calc["precio_flete"], calc["utilidad"],
+             datetime.now().isoformat(timespec="seconds"), session.get("nombre")))
+        db.commit()
+        resultado = {**calc, "unidad": unidad, "km": km, "cliente": cliente,
+                    "origen": origen, "destino": destino}
+
+    return render_template("flete_cotizar.html", unidades=unidades_l, resultado=resultado,
+                           datos={}, modulo="embarques")
+
+
+@app.route("/cotizaciones-flete")
+@embarques_required
+def flete_cotizaciones():
+    db = get_db()
+    filas = db.execute(
+        "SELECT f.*, u.clave AS unidad_clave, u.tipo AS unidad_tipo FROM fletes_cotizaciones f "
+        "LEFT JOIN unidades u ON u.id=f.unidad_id ORDER BY f.creado_en DESC").fetchall()
+    return render_template("flete_cotizaciones.html", cotizaciones=filas, modulo="embarques")
+
 
 @app.errorhandler(403)
 def forbidden(e):

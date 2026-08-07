@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h3 class="mb-0">Historial de cotizaciones</h3>
+  <a class="btn btn-outline-primary" href="{{ url_for('flete_cotizar') }}">Nueva cotización</a>
+</div>
+
+<div class="card">
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead><tr>
+        <th>Fecha</th><th>Unidad</th><th>Cliente</th><th>Ruta</th><th class="text-end">Km</th>
+        <th class="text-end">Gastos totales</th><th class="text-end">Precio flete</th>
+        <th class="text-end">Utilidad</th><th>Capturó</th>
+      </tr></thead>
+      <tbody>
+        {% for c in cotizaciones %}
+        <tr>
+          <td class="small">{{ c.creado_en }}</td>
+          <td class="small">{{ c.unidad_clave or '-' }} <span class="text-muted">({{ c.unidad_tipo }})</span></td>
+          <td class="small">{{ c.cliente or '-' }}</td>
+          <td class="small">{{ c.origen or '-' }} &rarr; {{ c.destino or '-' }}</td>
+          <td class="text-end">{{ c.km_recorrer }}</td>
+          <td class="text-end">{{ c.gastos_totales|money }}</td>
+          <td class="text-end fw-bold">{{ c.precio_flete|money }}</td>
+          <td class="text-end {{ 'text-success' if c.utilidad >= 0 else 'text-danger' }}">{{ c.utilidad|money }}</td>
+          <td class="small">{{ c.creado_por or '-' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="9" class="text-center text-muted py-4">Aún no hay cotizaciones guardadas.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

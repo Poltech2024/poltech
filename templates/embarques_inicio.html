@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block content %}
+<h3 class="mb-3">Embarques</h3>
+<div class="row g-3 mb-4">
+  <div class="col-6 col-md-3"><div class="card card-stat text-center p-3"><div class="num">{{ stats.unidades }}</div><div class="text-muted small">Unidades activas</div></div></div>
+  <div class="col-6 col-md-3"><div class="card card-stat text-center p-3"><div class="num">{{ stats.cotizaciones_mes }}</div><div class="text-muted small">Cotizaciones este mes</div></div></div>
+</div>
+<div class="card p-3">
+  <h6 class="text-navy">Para empezar (en orden):</h6>
+  <ol class="mb-0 small">
+    <li>Da de alta tus <a href="{{ url_for('unidades') }}">Unidades</a> (camionetas, tortones, tráilers).</li>
+    <li>Revisa el <a href="{{ url_for('unidades') }}">checklist de equipo</a> de cada una.</li>
+    <li><a href="{{ url_for('flete_cotizar') }}">Cotiza un flete</a> — calcula diesel, comisión del operador, viáticos y precio de venta.</li>
+  </ol>
+</div>
+{% endblock %}

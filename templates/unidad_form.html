@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h3 class="mb-0">Editar unidad</h3>
+  <a class="btn btn-outline-secondary" href="{{ url_for('unidades') }}">Volver al catálogo</a>
+</div>
+
+<form method="post" class="card p-4 row g-3" style="max-width:800px">
+  <div class="col-md-3"><label class="form-label small mb-1">Clave/No. económico</label>
+    <input name="clave" class="form-control" value="{{ u.clave or '' }}"></div>
+  <div class="col-md-3"><label class="form-label small mb-1">Tipo</label>
+    <input class="form-control" value="{{ u.tipo }}" disabled>
+    <div class="form-text">El tipo no se puede cambiar (define la tabla de comisión del operador).</div></div>
+  <div class="col-md-3"><label class="form-label small mb-1">Marca</label>
+    <input name="marca" class="form-control" value="{{ u.marca or '' }}"></div>
+  <div class="col-md-3"><label class="form-label small mb-1">Modelo</label>
+    <input name="modelo" class="form-control" value="{{ u.modelo or '' }}"></div>
+
+  <div class="col-md-3"><label class="form-label small mb-1">Año</label>
+    <input name="anio" type="number" class="form-control" value="{{ u.anio or '' }}"></div>
+  <div class="col-md-3"><label class="form-label small mb-1">Capacidad (toneladas)</label>
+    <input name="capacidad_toneladas" type="number" step="0.1" class="form-control" value="{{ u.capacidad_toneladas }}"></div>
+  <div class="col-md-3"><label class="form-label small mb-1">Rendimiento (km/litro) *</label>
+    <input name="rendimiento_km_l" type="number" step="0.01" class="form-control" value="{{ u.rendimiento_km_l }}" required></div>
+  <div class="col-md-3"><label class="form-label small mb-1">Combustible</label>
+    <input name="combustible" class="form-control" value="{{ u.combustible or 'Diesel' }}"></div>
+
+  <div class="col-md-3"><label class="form-label small mb-1">Placas</label>
+    <input name="placas" class="form-control" value="{{ u.placas or '' }}"></div>
+  <div class="col-md-3"><label class="form-label small mb-1">VIN / número económico</label>
+    <input name="numero_economico" class="form-control" value="{{ u.numero_economico or '' }}"></div>
+  <div class="col-md-3"><label class="form-label small mb-1">Vigencia seguro</label>
+    <input name="vigencia_seguro" type="date" class="form-control" value="{{ u.vigencia_seguro or '' }}"></div>
+  <div class="col-md-3"><label class="form-label small mb-1">Vigencia verificación</label>
+    <input name="vigencia_verificacion" type="date" class="form-control" value="{{ u.vigencia_verificacion or '' }}"></div>
+
+  <div class="col-md-4"><label class="form-label small mb-1">Estatus</label>
+    <select name="estatus" class="form-select">
+      <option {{ 'selected' if u.estatus=='Activa' }}>Activa</option>
+      <option {{ 'selected' if u.estatus=='En taller' }}>En taller</option>
+      <option {{ 'selected' if u.estatus=='Baja' }}>Baja</option>
+    </select></div>
+
+  <div class="col-12 d-flex gap-2">
+    <button class="btn btn-primary">Guardar cambios</button>
+    <a class="btn btn-outline-secondary" href="{{ url_for('unidades') }}">Cancelar</a>
+  </div>
+</form>
+{% endblock %}
