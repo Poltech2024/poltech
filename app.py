@@ -33,7 +33,7 @@ DB_PATH = os.environ.get("DB_PATH", os.path.join(APP_DIR, "poltech.db"))
 EQUIPO_DOCS_DIR = os.environ.get("EQUIPO_DOCS_DIR", os.path.join(os.path.dirname(DB_PATH), "equipo_docs"))
 os.makedirs(EQUIPO_DOCS_DIR, exist_ok=True)
 
-APP_VERSION = "1.48"   # version del sistema (visible en el menu)
+APP_VERSION = "1.49"   # version del sistema (visible en el menu)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-cambia-esta-clave-en-render")
@@ -2229,32 +2229,466 @@ def inicio():
                            puede_embarques=puede_ver_embarques(), puede_equipo=puede_ver_equipo())
 
 
+# ---------------------------------------------------------------------------
+# Dashboard ejecutivo: helpers centralizados (una sola fuente de verdad para
+# cada formula, usados por las 5 tarjetas, las graficas y las alertas).
+# ---------------------------------------------------------------------------
+DASHBOARD_DIAS_A_TIEMPO = 3     # dias despues del cierre de semana para considerar la nomina "a tiempo"
+DASHBOARD_DIAS_ALERTA_NOMINA = 2   # dias sin autorizar para que aparezca como alerta
+
+def _dash_num(v):
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _dashboard_scope_obras(db, obra_id_filtro):
+    """Cruza las obras visibles del usuario con el filtro de obra elegido.
+    None = sin restriccion, lista = solo esas, [] = ninguna."""
+    vis = obras_del_usuario(db)
+    if obra_id_filtro:
+        if vis is not None and obra_id_filtro not in vis:
+            return []
+        return [obra_id_filtro]
+    return vis
+
+
+def _dashboard_filtro_obras(sql, args, obras_ids, columna):
+    if obras_ids is not None:
+        if obras_ids:
+            ph = ",".join("?" * len(obras_ids))
+            sql += f" AND {columna} IN ({ph})"
+            args += list(obras_ids)
+        else:
+            sql += " AND 1=0"
+    return sql, args
+
+
+def dashboard_periodos(db, obras_ids):
+    """Semanas de nomina calculadas (mas reciente primero), ya filtradas por obra."""
+    sql = "SELECT DISTINCT fecha_inicio, fecha_fin, semana_num, anio FROM nominas WHERE 1=1"
+    args = []
+    sql, args = _dashboard_filtro_obras(sql, args, obras_ids, "obra_id")
+    sql += " ORDER BY fecha_inicio DESC LIMIT 26"
+    return db.execute(sql, args).fetchall()
+
+
+def kpi_personal(db, obras_ids, clasif, periodo_inicio, periodo_fin, periodo_ant_fin, estatus_filtro="activos"):
+    join = "FROM empleados e JOIN puestos p ON p.id=e.puesto_id"
+    where = "1=1"
+    args = []
+    if obras_ids is not None:
+        if obras_ids:
+            ph = ",".join("?" * len(obras_ids)); where += f" AND p.obra_id IN ({ph})"; args += list(obras_ids)
+        else:
+            where += " AND 1=0"
+    if clasif:
+        where += " AND p.clasificacion=?"; args.append(clasif)
+
+    def contar(extra_sql, extra_args):
+        return db.execute(f"SELECT COUNT(*) {join} WHERE {where} AND {extra_sql}",
+                          args + extra_args).fetchone()[0]
+
+    activos_hoy = contar("1=1", []) if estatus_filtro == "todos" else contar("e.estatus='activo'", [])
+    altas_periodo = contar("e.fecha_alta BETWEEN ? AND ?", [periodo_inicio, periodo_fin])
+    bajas_periodo = contar("e.fecha_baja BETWEEN ? AND ?", [periodo_inicio, periodo_fin])
+    activos_al_fin = contar("e.fecha_alta<=? AND (e.fecha_baja IS NULL OR e.fecha_baja>?)",
+                            [periodo_fin, periodo_fin])
+    if periodo_ant_fin:
+        activos_al_inicio = contar("e.fecha_alta<=? AND (e.fecha_baja IS NULL OR e.fecha_baja>?)",
+                                   [periodo_ant_fin, periodo_ant_fin])
+    else:
+        activos_al_inicio = activos_al_fin
+    promedio = (activos_al_inicio + activos_al_fin) / 2.0
+    rotacion = round(bajas_periodo / promedio * 100, 1) if promedio > 0 else 0.0
+    delta = activos_al_fin - activos_al_inicio
+    if rotacion <= 3:
+        semaforo = "ok"
+    elif rotacion <= 6:
+        semaforo = "warn"
+    else:
+        semaforo = "crit"
+    return {"activos": activos_hoy, "altas": altas_periodo, "bajas": bajas_periodo,
+            "rotacion": rotacion, "delta": delta, "activos_anterior": activos_al_inicio,
+            "semaforo": semaforo}
+
+
+def _costo_periodo(db, obras_ids, clasif, fecha_inicio):
+    if not fecha_inicio:
+        return 0.0, 0
+    sql = ("SELECT COALESCE(SUM(d.neto),0), COUNT(DISTINCT d.empleado_id) FROM nomina_detalle d "
+           "JOIN nominas n ON n.id=d.nomina_id WHERE n.fecha_inicio=?")
+    args = [fecha_inicio]
+    sql, args = _dashboard_filtro_obras(sql, args, obras_ids, "n.obra_id")
+    if clasif:
+        sql += " AND d.clasificacion=?"; args.append(clasif)
+    row = db.execute(sql, args).fetchone()
+    return _dash_num(row[0]), row[1]
+
+
+def kpi_costo(db, obras_ids, clasif, periodo_inicio, periodo_ant_inicio):
+    costo_actual, trabajadores = _costo_periodo(db, obras_ids, clasif, periodo_inicio)
+    costo_anterior, _ = _costo_periodo(db, obras_ids, clasif, periodo_ant_inicio)
+    variacion_abs = round(costo_actual - costo_anterior, 2)
+    variacion_pct = round(variacion_abs / costo_anterior * 100, 1) if costo_anterior else None
+    promedio_emp = round(costo_actual / trabajadores, 2) if trabajadores else 0.0
+    if variacion_pct is None:
+        semaforo = "ok"
+    elif abs(variacion_pct) <= 5:
+        semaforo = "ok"
+    elif variacion_pct <= 12:
+        semaforo = "warn"
+    else:
+        semaforo = "crit"
+    return {"total": round(costo_actual, 2), "anterior": round(costo_anterior, 2),
+            "variacion_abs": variacion_abs, "variacion_pct": variacion_pct,
+            "trabajadores": trabajadores, "promedio_empleado": promedio_emp, "semaforo": semaforo}
+
+
+def kpi_costo_por_obra(db, obras_ids, clasif, periodo_inicio):
+    sql = ("SELECT o.nombre AS obra, COALESCE(SUM(d.neto),0) AS costo FROM nomina_detalle d "
+           "JOIN nominas n ON n.id=d.nomina_id JOIN obras o ON o.id=n.obra_id WHERE n.fecha_inicio=?")
+    args = [periodo_inicio]
+    sql, args = _dashboard_filtro_obras(sql, args, obras_ids, "n.obra_id")
+    if clasif:
+        sql += " AND d.clasificacion=?"; args.append(clasif)
+    sql += " GROUP BY o.id ORDER BY costo DESC"
+    return [{"obra": r["obra"], "costo": round(_dash_num(r["costo"]), 2)}
+            for r in db.execute(sql, args).fetchall()]
+
+
+def kpi_tendencia(db, obras_ids, clasif, fechas_cronologico):
+    out = []
+    for f in fechas_cronologico:
+        costo, _ = _costo_periodo(db, obras_ids, clasif, f)
+        out.append({"fecha_inicio": f, "costo": round(costo, 2)})
+    return out
+
+
+def _incidencias_periodo(db, obras_ids, clasif, fecha_inicio):
+    sql = ("SELECT COALESCE(SUM(d.faltas),0), COALESCE(SUM(d.retardos),0), COALESCE(SUM(d.vacaciones),0), "
+           "COALESCE(SUM(d.bajada_dias),0), COALESCE(SUM(d.he_horas),0), COALESCE(SUM(d.he_importe),0), "
+           "COUNT(CASE WHEN d.retardos>=3 THEN 1 END) "
+           "FROM nomina_detalle d JOIN nominas n ON n.id=d.nomina_id WHERE n.fecha_inicio=?")
+    args = [fecha_inicio]
+    sql, args = _dashboard_filtro_obras(sql, args, obras_ids, "n.obra_id")
+    if clasif:
+        sql += " AND d.clasificacion=?"; args.append(clasif)
+    r = db.execute(sql, args).fetchone()
+    faltas, retardos, vacaciones, bajadas, he_horas, he_importe, casos_retardo = (
+        _dash_num(r[0]), _dash_num(r[1]), _dash_num(r[2]), _dash_num(r[3]),
+        _dash_num(r[4]), _dash_num(r[5]), r[6] or 0)
+    total = faltas + retardos + vacaciones + bajadas
+    return {"faltas": faltas, "retardos": retardos, "vacaciones": vacaciones, "bajadas": bajadas,
+            "he_horas": he_horas, "he_importe": round(he_importe, 2), "casos_retardo": casos_retardo,
+            "total": total}
+
+
+def kpi_incidencias(db, obras_ids, clasif, periodo_inicio, fechas_previas):
+    actual = _incidencias_periodo(db, obras_ids, clasif, periodo_inicio)
+    previos = [_incidencias_periodo(db, obras_ids, clasif, f)["total"] for f in fechas_previas]
+    promedio = sum(previos) / len(previos) if previos else 0.0
+    if promedio <= 0:
+        semaforo = "warn" if actual["total"] > 0 else "ok"
+        pct_vs_promedio = None
+    else:
+        pct_vs_promedio = round(actual["total"] / promedio * 100, 0)
+        if pct_vs_promedio <= 100:
+            semaforo = "ok"
+        elif pct_vs_promedio <= 130:
+            semaforo = "warn"
+        else:
+            semaforo = "crit"
+    actual["promedio_4sem"] = round(promedio, 1)
+    actual["pct_vs_promedio"] = pct_vs_promedio
+    actual["semaforo"] = semaforo
+    return actual
+
+
+def kpi_cumplimiento_nomina(db, obras_ids, periodo_inicio):
+    sql = "SELECT estatus, autorizada_en, fecha_fin FROM nominas WHERE fecha_inicio=?"
+    args = [periodo_inicio]
+    sql, args = _dashboard_filtro_obras(sql, args, obras_ids, "obra_id")
+    rows = db.execute(sql, args).fetchall()
+    total = len(rows)
+    autorizadas = sum(1 for r in rows if (r["estatus"] or "pendiente") == "autorizada")
+    a_tiempo = 0
+    for r in rows:
+        if (r["estatus"] or "pendiente") != "autorizada" or not r["autorizada_en"]:
+            continue
+        try:
+            dias = (date.fromisoformat(r["autorizada_en"][:10]) - date.fromisoformat(r["fecha_fin"])).days
+        except ValueError:
+            continue
+        if dias <= DASHBOARD_DIAS_A_TIEMPO:
+            a_tiempo += 1
+    pendientes = total - autorizadas
+    pct = round(a_tiempo / total * 100, 1) if total else None
+    if pct is None:
+        semaforo = "ok"
+    elif pct >= 95:
+        semaforo = "ok"
+    elif pct >= 85:
+        semaforo = "warn"
+    else:
+        semaforo = "crit"
+    return {"total": total, "autorizadas": autorizadas, "a_tiempo": a_tiempo,
+            "pendientes": pendientes, "pct": pct, "semaforo": semaforo}
+
+
+def kpi_documental(db, obras_ids, clasif):
+    join = "FROM empleados e JOIN puestos p ON p.id=e.puesto_id"
+    where = "e.estatus='activo'"
+    args = []
+    if obras_ids is not None:
+        if obras_ids:
+            ph = ",".join("?" * len(obras_ids)); where += f" AND p.obra_id IN ({ph})"; args += list(obras_ids)
+        else:
+            where += " AND 1=0"
+    if clasif:
+        where += " AND p.clasificacion=?"; args.append(clasif)
+    total = db.execute(f"SELECT COUNT(*) {join} WHERE {where}", args).fetchone()[0]
+    completos = db.execute(
+        f"SELECT COUNT(*) {join} WHERE {where} AND e.estatus_docs IN ('Carga completa','Validado')",
+        args).fetchone()[0]
+    faltantes = total - completos
+    pct = round(completos / total * 100, 1) if total else None
+    if pct is None:
+        semaforo = "ok"
+    elif pct >= 90:
+        semaforo = "ok"
+    elif pct >= 75:
+        semaforo = "warn"
+    else:
+        semaforo = "crit"
+    return {"total": total, "completos": completos, "faltantes": faltantes, "pct": pct, "semaforo": semaforo}
+
+
+def dashboard_alertas(db, obras_ids, clasif, incidencias):
+    alertas = []
+
+    sql = ("SELECT o.nombre AS obra, COUNT(*) AS n FROM empleados e JOIN puestos p ON p.id=e.puesto_id "
+           "JOIN obras o ON o.id=p.obra_id WHERE e.estatus='activo' "
+           "AND COALESCE(e.estatus_docs,'Pendiente de carga') NOT IN ('Carga completa','Validado')")
+    args = []
+    sql, args = _dashboard_filtro_obras(sql, args, obras_ids, "p.obra_id")
+    if clasif:
+        sql += " AND p.clasificacion=?"; args.append(clasif)
+    sql += " GROUP BY o.id ORDER BY n DESC"
+    for r in db.execute(sql, args).fetchall():
+        alertas.append({
+            "severidad": "crit" if r["n"] >= 5 else "warn",
+            "texto": f"{r['n']} expediente(s) incompleto(s) en {r['obra']}",
+            "responsable": f"Residente — {r['obra']}", "desde": "",
+            "accion": "Completar expedientes"})
+
+    sql2 = ("SELECT b.dias_excedente, b.fecha_inicio, e.nombre, e.primer_apellido, o.nombre AS obra "
+            "FROM bajadas_historico b JOIN empleados e ON e.id=b.empleado_id "
+            "LEFT JOIN puestos p ON p.id=e.puesto_id LEFT JOIN obras o ON o.id=p.obra_id "
+            "WHERE b.descuento_pendiente>0 AND b.descuento_aplicado_en IS NULL")
+    args2 = []
+    sql2, args2 = _dashboard_filtro_obras(sql2, args2, obras_ids, "o.id")
+    for r in db.execute(sql2, args2).fetchall():
+        alertas.append({
+            "severidad": "warn",
+            "texto": (f"Bajada a casa de {r['nombre']} {r['primer_apellido']} con "
+                      f"{r['dias_excedente']:g} dia(s) de excedente sin descontar"),
+            "responsable": "Administracion de nomina", "desde": r["fecha_inicio"],
+            "accion": "Se descuenta solo en la siguiente nomina de la persona"})
+
+    sql3 = ("SELECT n.id, n.fecha_fin, n.semana_num, n.anio, o.nombre AS obra FROM nominas n "
+            "JOIN obras o ON o.id=n.obra_id WHERE COALESCE(n.estatus,'pendiente')='pendiente'")
+    args3 = []
+    sql3, args3 = _dashboard_filtro_obras(sql3, args3, obras_ids, "n.obra_id")
+    for r in db.execute(sql3, args3).fetchall():
+        try:
+            dias = (date.today() - date.fromisoformat(r["fecha_fin"])).days
+        except ValueError:
+            continue
+        if dias >= DASHBOARD_DIAS_ALERTA_NOMINA:
+            alertas.append({
+                "severidad": "crit" if dias >= 7 else "warn",
+                "texto": f"Nomina {r['obra']} semana {r['semana_num']}/{r['anio']} sin autorizar",
+                "responsable": "Superintendente/Administrador", "desde": f"{dias} dias",
+                "accion": "Autorizar y liberar"})
+
+    if incidencias.get("casos_retardo", 0) >= 3:
+        alertas.append({
+            "severidad": "warn", "texto": f"{incidencias['casos_retardo']} trabajador(es) con 3 o mas retardos esta semana",
+            "responsable": "Residente de obra", "desde": "Esta semana", "accion": "Revisar asistencia"})
+
+    alertas.sort(key=lambda a: 0 if a["severidad"] == "crit" else 1)
+    return alertas[:12]
+
+
+def _dashboard_calcular(db, f_obra, f_clasif, f_estatus, f_periodo):
+    """Un solo lugar que calcula las 5 KPIs del dashboard ejecutivo, para que la
+    pantalla y el Excel siempre muestren exactamente los mismos numeros."""
+    obra_id_int = int(f_obra) if f_obra.isdigit() else None
+    obras_ids = _dashboard_scope_obras(db, obra_id_int)
+
+    obras_dd = obras_visibles(db)
+    clasificaciones = [r["nombre"] for r in
+                       db.execute("SELECT nombre FROM clasificaciones ORDER BY id").fetchall()]
+    periodos = dashboard_periodos(db, obras_ids)
+    actualizado = datetime.now()
+    base = {"sin_datos": True, "obras": obras_dd, "clasificaciones": clasificaciones,
+            "f_obra": f_obra, "f_clasif": f_clasif, "f_estatus": f_estatus,
+            "actualizado": actualizado, "periodos": []}
+    if not periodos:
+        return base
+
+    idx_sel = 0
+    for i, p in enumerate(periodos):
+        if p["fecha_inicio"] == f_periodo:
+            idx_sel = i
+            break
+    sel = periodos[idx_sel]
+    anterior = periodos[idx_sel + 1] if idx_sel + 1 < len(periodos) else None
+    periodo_inicio, periodo_fin = sel["fecha_inicio"], sel["fecha_fin"]
+    periodo_ant_inicio = anterior["fecha_inicio"] if anterior else None
+    periodo_ant_fin = anterior["fecha_fin"] if anterior else None
+
+    personal = kpi_personal(db, obras_ids, f_clasif, periodo_inicio, periodo_fin, periodo_ant_fin, f_estatus)
+    costo = kpi_costo(db, obras_ids, f_clasif, periodo_inicio, periodo_ant_inicio)
+    costo_obra = kpi_costo_por_obra(db, obras_ids, f_clasif, periodo_inicio)
+    fechas_tendencia = [p["fecha_inicio"] for p in periodos[:6]][::-1]
+    tendencia = kpi_tendencia(db, obras_ids, f_clasif, fechas_tendencia)
+    fechas_prev4 = [p["fecha_inicio"] for p in periodos[idx_sel + 1:idx_sel + 5]]
+    incidencias = kpi_incidencias(db, obras_ids, f_clasif, periodo_inicio, fechas_prev4)
+    cumplimiento = kpi_cumplimiento_nomina(db, obras_ids, periodo_inicio)
+    documental = kpi_documental(db, obras_ids, f_clasif)
+    alertas = dashboard_alertas(db, obras_ids, f_clasif, incidencias)
+
+    # Puntos del SVG de tendencia (evita hacer aritmetica en la plantilla)
+    valores = [t["costo"] for t in tendencia]
+    tendencia_puntos, tendencia_area = "", ""
+    tendencia_ultimo = None
+    if valores:
+        cmin, cmax = min(valores), max(valores)
+        rango = (cmax - cmin) or max(cmax, 1)
+        n = len(valores)
+        pts = []
+        for i, c in enumerate(valores):
+            x = round(i * (640 / (n - 1)), 1) if n > 1 else 320.0
+            y = round(150 - ((c - cmin) / rango) * 120, 1)
+            pts.append((x, y))
+        tendencia_puntos = " ".join(f"{x},{y}" for x, y in pts)
+        tendencia_area = tendencia_puntos + f" {pts[-1][0]},170 {pts[0][0]},170"
+        tendencia_ultimo = pts[-1]
+    # % de barra para costo por obra (relativo al mayor)
+    max_costo_obra = max([c["costo"] for c in costo_obra], default=0) or 1
+    for c in costo_obra:
+        c["pct"] = round(c["costo"] / max_costo_obra * 100, 1)
+
+    base.update(sin_datos=False, personal=personal, costo=costo, costo_obra=costo_obra,
+               tendencia=tendencia, incidencias=incidencias, cumplimiento=cumplimiento,
+               documental=documental, alertas=alertas, tendencia_puntos=tendencia_puntos,
+               tendencia_area=tendencia_area, tendencia_ultimo=tendencia_ultimo,
+               periodos=periodos, periodo_sel=sel)
+    return base
+
+
 @app.route("/nominas")
 @login_required
 def dashboard():
     db = get_db()
-    vis = obras_del_usuario(db)
-    if vis is None:
-        stats = {
-            "empleados": db.execute("SELECT COUNT(*) FROM empleados WHERE estatus='activo'").fetchone()[0],
-            "obras": db.execute("SELECT COUNT(*) FROM obras").fetchone()[0],
-            "puestos": db.execute("SELECT COUNT(*) FROM puestos").fetchone()[0],
-            "cuentas": db.execute("SELECT COUNT(*) FROM cuentas_bancarias").fetchone()[0],
-        }
-    elif vis:
-        ph = ",".join("?" * len(vis))
-        stats = {
-            "empleados": db.execute(f"SELECT COUNT(*) FROM empleados e JOIN puestos p ON p.id=e.puesto_id "
-                                    f"WHERE e.estatus='activo' AND p.obra_id IN ({ph})", vis).fetchone()[0],
-            "obras": len(vis),
-            "puestos": db.execute(f"SELECT COUNT(*) FROM puestos WHERE obra_id IN ({ph})", vis).fetchone()[0],
-            "cuentas": db.execute(f"SELECT COUNT(*) FROM cuentas_bancarias c JOIN empleados e ON e.id=c.empleado_id "
-                                  f"JOIN puestos p ON p.id=e.puesto_id WHERE p.obra_id IN ({ph})", vis).fetchone()[0],
-        }
-    else:
-        stats = {"empleados": 0, "obras": 0, "puestos": 0, "cuentas": 0}
-    usa_default = os.environ.get("ADMIN_PASSWORD") is None
-    return render_template("dashboard.html", stats=stats, usa_default=usa_default)
+    f_obra = request.args.get("obra_id", "").strip()
+    f_clasif = request.args.get("clasificacion", "").strip()
+    f_estatus = request.args.get("estatus", "activos").strip()
+    f_periodo = request.args.get("periodo", "").strip()
+    datos = _dashboard_calcular(db, f_obra, f_clasif, f_estatus, f_periodo)
+    return render_template("dashboard.html", **datos)
+
+
+@app.route("/nominas/excel")
+@login_required
+def dashboard_excel():
+    db = get_db()
+    f_obra = request.args.get("obra_id", "").strip()
+    f_clasif = request.args.get("clasificacion", "").strip()
+    f_estatus = request.args.get("estatus", "activos").strip()
+    f_periodo = request.args.get("periodo", "").strip()
+    datos = _dashboard_calcular(db, f_obra, f_clasif, f_estatus, f_periodo)
+    if datos["sin_datos"]:
+        flash("Todavia no hay ninguna nomina calculada para generar el resumen.", "warning")
+        return redirect(url_for("dashboard"))
+
+    from openpyxl.styles import Font, PatternFill, Alignment
+    NAVY = "16233C"
+    wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Dashboard"
+    ws["A1"] = "POLTECH ACERO Y CONSTRUCCION, S.A. DE C.V."
+    ws["A1"].font = Font(name="Arial", bold=True, size=13, color=NAVY)
+    obra_nombre = next((o["nombre"] for o in datos["obras"] if str(o["id"]) == f_obra), "Todas las obras")
+    ws["A2"] = (f"DASHBOARD EJECUTIVO  -  Semana {datos['periodo_sel']['semana_num']}/"
+               f"{datos['periodo_sel']['anio']}  -  {obra_nombre}"
+               f"{'  -  ' + f_clasif if f_clasif else ''}")
+    ws["A2"].font = Font(name="Arial", size=10, italic=True, color="555555")
+    ws["A3"] = f"Generado: {datos['actualizado'].strftime('%d/%m/%Y %H:%M')}"
+    ws["A3"].font = Font(name="Arial", size=9, color="777777")
+
+    def titulo(ws, fila, texto):
+        c = ws.cell(fila, 1, texto)
+        c.font = Font(name="Arial", bold=True, size=11, color="FFFFFF")
+        c.fill = PatternFill("solid", fgColor=NAVY)
+        ws.merge_cells(start_row=fila, start_column=1, end_row=fila, end_column=5)
+        return fila + 1
+
+    r = 5
+    r = titulo(ws, r, "INDICADORES")
+    ws.append(["Indicador", "Valor", "Comparacion", "Semaforo", ""]); r += 1
+    for c in ws[r - 1]:
+        c.font = Font(name="Arial", bold=True, color="FFFFFF"); c.fill = PatternFill("solid", fgColor="4A5568")
+    p, co, inc, cu, do = (datos["personal"], datos["costo"], datos["incidencias"],
+                          datos["cumplimiento"], datos["documental"])
+    filas_kpi = [
+        ("Personal activo", p["activos"], f"{p['altas']} altas / {p['bajas']} bajas, rotacion {p['rotacion']}%", p["semaforo"]),
+        ("Costo de nomina", co["total"], (f"{co['variacion_pct']}% vs. semana anterior" if co["variacion_pct"] is not None
+                                          else "Sin semana anterior"), co["semaforo"]),
+        ("Incidencias laborales", inc["total"], f"H.E. {inc['he_horas']:.1f} h / {inc['he_importe']:.2f} pesos", inc["semaforo"]),
+        ("Cumplimiento de nomina", f"{cu['pct']}%" if cu["pct"] is not None else "-",
+         f"{cu['autorizadas']}/{cu['total']} autorizadas, {cu['pendientes']} pendiente(s)", cu["semaforo"]),
+        ("Cumplimiento documental", f"{do['pct']}%" if do["pct"] is not None else "-",
+         f"{do['completos']}/{do['total']} completos, {do['faltantes']} faltante(s)", do["semaforo"]),
+    ]
+    for nombre, valor, comp, sem in filas_kpi:
+        ws.append([nombre, valor, comp, {"ok": "Correcto", "warn": "Atencion", "crit": "Critico"}[sem], ""])
+        r += 1
+    r += 1
+
+    r = titulo(ws, r, "COSTO POR OBRA")
+    ws.append(["Obra", "Costo", "", "", ""]); r += 1
+    for c in ws[r - 1][:2]:
+        c.font = Font(name="Arial", bold=True, color="FFFFFF"); c.fill = PatternFill("solid", fgColor="4A5568")
+    for co_obra in datos["costo_obra"]:
+        ws.append([co_obra["obra"], co_obra["costo"], "", "", ""]); r += 1
+    r += 1
+
+    r = titulo(ws, r, "TENDENCIA (ULTIMOS PERIODOS)")
+    ws.append(["Semana", "Costo", "", "", ""]); r += 1
+    for c in ws[r - 1][:2]:
+        c.font = Font(name="Arial", bold=True, color="FFFFFF"); c.fill = PatternFill("solid", fgColor="4A5568")
+    for t in datos["tendencia"]:
+        ws.append([t["fecha_inicio"], t["costo"], "", "", ""]); r += 1
+    r += 1
+
+    r = titulo(ws, r, "ALERTAS PRIORITARIAS")
+    ws.append(["Gravedad", "Alerta", "Responsable", "Desde", "Accion"]); r += 1
+    for c in ws[r - 1]:
+        c.font = Font(name="Arial", bold=True, color="FFFFFF"); c.fill = PatternFill("solid", fgColor="4A5568")
+    for a in datos["alertas"]:
+        ws.append([("Critico" if a["severidad"] == "crit" else "Atencion"), a["texto"],
+                   a["responsable"], a["desde"], a["accion"]]); r += 1
+
+    ws.column_dimensions["A"].width = 30
+    for L in ("B", "C", "D", "E"):
+        ws.column_dimensions[L].width = 26
+
+    buf = io.BytesIO(); wb.save(buf); buf.seek(0)
+    nombre = f"Dashboard_{datos['periodo_sel']['fecha_inicio']}.xlsx"
+    return send_file(buf, as_attachment=True, download_name=nombre,
+                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 # ---------------------------------------------------------------------------
 # Obras

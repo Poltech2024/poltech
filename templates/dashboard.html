@@ -1,24 +1,239 @@
 {% extends "base.html" %}
+{% block title %}Inicio - Nomina Poltech{% endblock %}
 {% block content %}
-<h3 class="mb-3">Inicio</h3>
-{% if usa_default %}
-<div class="alert alert-warning py-2">
-  Estas usando la contrasena por defecto del administrador. Por seguridad,
-  <a href="{{ url_for('cambiar_password') }}">cambiala aqui</a> o define <b>ADMIN_PASSWORD</b> en Render.
+<style>
+  .dash-top{ display:flex; align-items:flex-end; justify-content:space-between; gap:1rem; flex-wrap:wrap; margin-bottom:.9rem; }
+  .dash-updated{ font-size:.76rem; color:#6B7280; }
+  .dash-updated .dot{ width:6px; height:6px; border-radius:50%; background:#1E7E34; display:inline-block; margin-right:.3rem; }
+  .dash-filters{ display:flex; gap:.6rem; flex-wrap:wrap; align-items:end; background:#fff; border:1px solid #E4E8EF;
+    border-radius:.6rem; padding:.65rem .75rem; margin-bottom:1.1rem; }
+  .dash-filters .field{ display:flex; flex-direction:column; }
+  .dash-filters label{ font-size:.66rem; text-transform:uppercase; letter-spacing:.05em; color:#6B7280; margin-bottom:.15rem; }
+  .dash-filters select{ font-size:.82rem; min-width:150px; }
+  .dash-filters .spacer{ flex:1; }
+  .kpis{ display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:.8rem; margin-bottom:1.1rem; }
+  .kpi-card{ background:#fff; border:1px solid #E4E8EF; border-radius:.7rem; padding:.9rem 1rem .8rem;
+    position:relative; overflow:hidden; text-decoration:none; color:inherit; display:block;
+    transition:transform .12s ease, box-shadow .12s ease; }
+  .kpi-card:hover{ transform:translateY(-2px); box-shadow:0 10px 22px -14px rgba(22,35,60,.32); color:inherit; }
+  .kpi-card::before{ content:""; position:absolute; left:0; top:0; bottom:0; width:4px; }
+  .kpi-card.ok::before{ background:#1E7E34; }
+  .kpi-card.warn::before{ background:#B8860B; }
+  .kpi-card.crit::before{ background:#C6362B; }
+  .kpi-card-head{ display:flex; justify-content:space-between; align-items:center; margin-bottom:.4rem; }
+  .kpi-card-label{ font-size:.68rem; text-transform:uppercase; letter-spacing:.05em; color:#6B7280; font-weight:700; }
+  .kpi-semaforo{ font-size:.66rem; font-weight:700; padding:.12rem .45rem; border-radius:1rem; }
+  .kpi-semaforo.ok{ color:#1E7E34; background:#E7F4EC; }
+  .kpi-semaforo.warn{ color:#B8860B; background:#FBF1DD; }
+  .kpi-semaforo.crit{ color:#C6362B; background:#FBEAE8; }
+  .kpi-num{ font-size:1.85rem; font-weight:800; color:var(--navy); line-height:1; font-variant-numeric:tabular-nums; }
+  .kpi-num small{ font-size:.95rem; font-weight:700; color:#6B7280; }
+  .kpi-desc{ font-size:.75rem; color:#6B7280; margin:.2rem 0 .5rem; }
+  .kpi-delta{ font-size:.74rem; font-weight:700; }
+  .kpi-delta.up{ color:#1E7E34; } .kpi-delta.down{ color:#C6362B; } .kpi-delta.flat{ color:#6B7280; }
+  .kpi-foot{ margin-top:.5rem; padding-top:.5rem; border-top:1px dashed #E4E8EF; font-size:.71rem;
+    color:#6B7280; display:flex; justify-content:space-between; gap:.4rem; }
+  .kpi-foot .link{ color:var(--azul); font-weight:700; white-space:nowrap; }
+  .charts-row{ display:grid; grid-template-columns:1.5fr 1fr; gap:.8rem; margin-bottom:1.1rem; }
+  @media (max-width:900px){ .charts-row{ grid-template-columns:1fr; } }
+  .panel{ background:#fff; border:1px solid #E4E8EF; border-radius:.7rem; padding:.9rem 1rem 1rem; }
+  .panel-title{ font-size:.88rem; font-weight:800; color:var(--navy); }
+  .panel-sub{ font-size:.71rem; color:#6B7280; margin-bottom:.5rem; }
+  .obra-row{ display:flex; align-items:center; gap:.5rem; font-size:.78rem; padding:.28rem 0; }
+  .obra-row .nombre{ width:120px; flex:none; font-weight:600; color:var(--navy); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .obra-row .track{ flex:1; height:8px; background:#F1F4F9; border-radius:4px; overflow:hidden; border:1px solid #E4E8EF; }
+  .obra-row .fill{ height:100%; background:linear-gradient(90deg, var(--azul), #6BA6F0); }
+  .obra-row .val{ width:88px; flex:none; text-align:right; font-variant-numeric:tabular-nums; color:#6B7280; font-weight:700; }
+  .alert-table{ width:100%; border-collapse:collapse; font-size:.8rem; }
+  .alert-table thead th{ text-align:left; font-size:.66rem; text-transform:uppercase; letter-spacing:.05em;
+    color:#6B7280; font-weight:700; padding:0 .5rem .45rem; border-bottom:1px solid #E4E8EF; }
+  .alert-table tbody td{ padding:.5rem .5rem; border-bottom:1px solid #F1F4F9; vertical-align:top; }
+  .sev-badge{ font-size:.66rem; font-weight:800; padding:.16rem .5rem; border-radius:1rem; white-space:nowrap; }
+  .sev-badge.crit{ color:#C6362B; background:#FBEAE8; }
+  .sev-badge.warn{ color:#B8860B; background:#FBF1DD; }
+</style>
+
+<div class="dash-top">
+  <h3 class="mb-0">Dashboard ejecutivo</h3>
+  <div class="dash-updated"><span class="dot"></span>Actualizado: {{ actualizado.strftime('%d/%m/%Y %H:%M') }}</div>
 </div>
-{% endif %}
-<div class="row g-3 mb-4">
-  <div class="col-6 col-md-3"><div class="card card-stat text-center p-3"><div class="num">{{ stats.empleados }}</div><div class="text-muted small">Empleados activos</div></div></div>
-  <div class="col-6 col-md-3"><div class="card card-stat text-center p-3"><div class="num">{{ stats.obras }}</div><div class="text-muted small">Obras</div></div></div>
-  <div class="col-6 col-md-3"><div class="card card-stat text-center p-3"><div class="num">{{ stats.puestos }}</div><div class="text-muted small">Puestos en catalogo</div></div></div>
-  <div class="col-6 col-md-3"><div class="card card-stat text-center p-3"><div class="num">{{ stats.cuentas }}</div><div class="text-muted small">Cuentas bancarias</div></div></div>
-</div>
-<div class="card p-3">
-  <h6 class="text-navy">Para empezar (en orden):</h6>
-  <ol class="mb-0 small">
+
+{% if sin_datos %}
+<div class="alert alert-info">
+  Todavia no hay ninguna nomina calculada {% if f_obra %}para esta obra{% endif %}. En cuanto calcules la
+  primera nomina, este dashboard se llena solo. Mientras tanto:
+  <ol class="mb-0 mt-2 small">
     <li>Registra tus <a href="{{ url_for('obras') }}">Obras</a>.</li>
-    <li>Crea el <a href="{{ url_for('catalogo') }}">Catalogo de sueldos</a> (puestos con sueldo y viaticos por obra).</li>
-    <li>Da de alta al <a href="{{ url_for('personal') }}">Personal</a> con su cuenta bancaria.</li>
+    <li>Crea el <a href="{{ url_for('catalogo') }}">Catalogo de sueldos</a>.</li>
+    <li>Da de alta al <a href="{{ url_for('personal') }}">Personal</a> y calcula la primera <a href="{{ url_for('nomina') }}">nomina</a>.</li>
   </ol>
 </div>
+{% else %}
+
+<form method="get" class="dash-filters">
+  <div class="field"><label>Periodo</label>
+    <select name="periodo" class="form-select form-select-sm" onchange="this.form.submit()">
+      {% for p in periodos %}
+      <option value="{{ p.fecha_inicio }}" {{ 'selected' if p.fecha_inicio==periodo_sel.fecha_inicio }}>
+        Semana {{ p.semana_num }}/{{ p.anio }} ({{ p.fecha_inicio }})</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="field"><label>Obra</label>
+    <select name="obra_id" class="form-select form-select-sm" onchange="this.form.submit()">
+      <option value="">Todas las obras</option>
+      {% for o in obras %}<option value="{{ o.id }}" {{ 'selected' if f_obra==o.id|string }}>{{ o.nombre }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="field"><label>Clasificacion</label>
+    <select name="clasificacion" class="form-select form-select-sm" onchange="this.form.submit()">
+      <option value="">Todas</option>
+      {% for c in clasificaciones %}<option value="{{ c }}" {{ 'selected' if f_clasif==c }}>{{ c }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="field"><label>Estatus trabajador</label>
+    <select name="estatus" class="form-select form-select-sm" onchange="this.form.submit()">
+      <option value="activos" {{ 'selected' if f_estatus=='activos' }}>Activos</option>
+      <option value="todos" {{ 'selected' if f_estatus=='todos' }}>Todos</option>
+    </select>
+  </div>
+  <div class="spacer"></div>
+  <a class="btn btn-sm btn-outline-primary"
+     href="{{ url_for('dashboard_excel', periodo=periodo_sel.fecha_inicio, obra_id=f_obra, clasificacion=f_clasif, estatus=f_estatus) }}">
+     ⭳ Exportar Excel</a>
+</form>
+
+<p class="small text-muted" style="margin-top:-.6rem">
+  Personal activo y expedientes reflejan hoy ({{ 'solo activos' if f_estatus=='activos' else 'activos y bajas' }});
+  costo, incidencias y cumplimiento reflejan la nomina de la semana seleccionada.
+</p>
+
+<div class="kpis">
+
+  <a class="kpi-card {{ personal.semaforo }}" href="{{ url_for('personal') }}">
+    <div class="kpi-card-head"><span class="kpi-card-label">Personal activo</span>
+      <span class="kpi-semaforo {{ personal.semaforo }}">{{ {'ok':'OK','warn':'Atencion','crit':'Critico'}[personal.semaforo] }}</span></div>
+    <div class="kpi-num">{{ personal.activos }}</div>
+    <div class="kpi-desc">{{ personal.altas }} altas · {{ personal.bajas }} bajas esta semana</div>
+    <div class="kpi-delta {{ 'up' if personal.delta > 0 else ('down' if personal.delta < 0 else 'flat') }}">
+      {{ '▲' if personal.delta > 0 else ('▼' if personal.delta < 0 else '—') }} {{ personal.delta }}
+      <span class="text-muted fw-normal">vs. semana anterior ({{ personal.activos_anterior }})</span></div>
+    <div class="kpi-foot"><span>Rotacion: {{ personal.rotacion }}%</span><span class="link">Ver Personal →</span></div>
+  </a>
+
+  <a class="kpi-card {{ costo.semaforo }}"
+     href="{{ url_for('reporte_historial_nomina', desde=periodo_sel.fecha_inicio, hasta=periodo_sel.fecha_inicio) }}">
+    <div class="kpi-card-head"><span class="kpi-card-label">Costo de nomina</span>
+      <span class="kpi-semaforo {{ costo.semaforo }}">{{ {'ok':'OK','warn':'Atencion','crit':'Critico'}[costo.semaforo] }}</span></div>
+    <div class="kpi-num">{{ costo.total|money }}</div>
+    <div class="kpi-desc">{{ costo.promedio_empleado|money }} promedio por trabajador</div>
+    {% if costo.variacion_pct is not none %}
+    <div class="kpi-delta {{ 'up' if costo.variacion_pct > 0 else ('down' if costo.variacion_pct < 0 else 'flat') }}">
+      {{ '▲' if costo.variacion_pct > 0 else ('▼' if costo.variacion_pct < 0 else '—') }} {{ costo.variacion_pct }}%
+      <span class="text-muted fw-normal">({{ costo.variacion_abs|money }} vs. semana anterior)</span></div>
+    {% else %}
+    <div class="kpi-delta flat">Sin semana anterior para comparar</div>
+    {% endif %}
+    <div class="kpi-foot"><span>Sin presupuesto capturado</span><span class="link">Ver detalle →</span></div>
+  </a>
+
+  <a class="kpi-card {{ incidencias.semaforo }}"
+     href="{{ url_for('reporte_historial_nomina', desde=periodo_sel.fecha_inicio, hasta=periodo_sel.fecha_inicio) }}">
+    <div class="kpi-card-head"><span class="kpi-card-label">Incidencias laborales</span>
+      <span class="kpi-semaforo {{ incidencias.semaforo }}">{{ {'ok':'OK','warn':'Atencion','crit':'Critico'}[incidencias.semaforo] }}</span></div>
+    <div class="kpi-num">{{ incidencias.total|int }}</div>
+    <div class="kpi-desc">{{ incidencias.faltas|int }} faltas · {{ incidencias.retardos|int }} retardos ·
+      {{ incidencias.vacaciones|int }} vac. · {{ incidencias.bajadas|int }} bajadas</div>
+    {% if incidencias.pct_vs_promedio is not none %}
+    <div class="kpi-delta {{ 'down' if incidencias.pct_vs_promedio > 100 else 'up' }}">
+      {{ incidencias.pct_vs_promedio|int }}% <span class="text-muted fw-normal">del promedio de 4 semanas ({{ incidencias.promedio_4sem }})</span></div>
+    {% else %}
+    <div class="kpi-delta flat">Sin historial para comparar</div>
+    {% endif %}
+    <div class="kpi-foot"><span>H.E.: {{ incidencias.he_horas|round(1) }} h · {{ incidencias.he_importe|money }}</span><span class="link">Ver detalle →</span></div>
+  </a>
+
+  <a class="kpi-card {{ cumplimiento.semaforo }}" href="{{ url_for('nomina') }}">
+    <div class="kpi-card-head"><span class="kpi-card-label">Cumplimiento de nomina</span>
+      <span class="kpi-semaforo {{ cumplimiento.semaforo }}">{{ {'ok':'OK','warn':'Atencion','crit':'Critico'}[cumplimiento.semaforo] }}</span></div>
+    <div class="kpi-num">{% if cumplimiento.pct is not none %}{{ cumplimiento.pct }}<small>%</small>{% else %}—{% endif %}</div>
+    <div class="kpi-desc">nominas autorizadas y liberadas a tiempo</div>
+    <div class="kpi-delta flat">{{ cumplimiento.autorizadas }}/{{ cumplimiento.total }} autorizadas</div>
+    <div class="kpi-foot"><span>{{ cumplimiento.pendientes }} pendiente(s)</span><span class="link">Ver nominas →</span></div>
+  </a>
+
+  <a class="kpi-card {{ documental.semaforo }}" href="{{ url_for('personal') }}">
+    <div class="kpi-card-head"><span class="kpi-card-label">Cumplimiento documental</span>
+      <span class="kpi-semaforo {{ documental.semaforo }}">{{ {'ok':'OK','warn':'Atencion','crit':'Critico'}[documental.semaforo] }}</span></div>
+    <div class="kpi-num">{% if documental.pct is not none %}{{ documental.pct }}<small>%</small>{% else %}—{% endif %}</div>
+    <div class="kpi-desc">expedientes completos (INE, contrato, comprobante)</div>
+    <div class="kpi-delta flat">{{ documental.completos }}/{{ documental.total }} completos</div>
+    <div class="kpi-foot"><span>{{ documental.faltantes }} incompleto(s)</span><span class="link">Ver expedientes →</span></div>
+  </a>
+
+</div>
+
+<div class="charts-row">
+  <div class="panel">
+    <div class="panel-title">Tendencia del costo de nomina</div>
+    <div class="panel-sub">Ultimos {{ tendencia|length }} periodo(s) calculados</div>
+    {% if tendencia_puntos %}
+    <svg viewBox="0 0 640 170" style="width:100%; height:auto;">
+      <line x1="0" y1="30" x2="640" y2="30" stroke="#E4E8EF" stroke-width="1"/>
+      <line x1="0" y1="80" x2="640" y2="80" stroke="#E4E8EF" stroke-width="1"/>
+      <line x1="0" y1="130" x2="640" y2="130" stroke="#E4E8EF" stroke-width="1"/>
+      <polygon points="{{ tendencia_area }}" fill="var(--azul)" opacity="0.1"/>
+      <polyline points="{{ tendencia_puntos }}" fill="none" stroke="var(--azul)" stroke-width="2.5"
+                stroke-linejoin="round" stroke-linecap="round"/>
+      {% if tendencia_ultimo %}
+      <circle cx="{{ tendencia_ultimo[0] }}" cy="{{ tendencia_ultimo[1] }}" r="5" fill="#fff" stroke="var(--azul)" stroke-width="2.5"/>
+      {% endif %}
+    </svg>
+    <div class="d-flex justify-content-between small text-muted">
+      {% for t in tendencia %}<span>S{{ t.fecha_inicio[5:] }}</span>{% endfor %}
+    </div>
+    {% else %}
+    <p class="text-muted small">No hay suficiente historial todavia.</p>
+    {% endif %}
+  </div>
+
+  <div class="panel">
+    <div class="panel-title">Costo por obra</div>
+    <div class="panel-sub">Semana {{ periodo_sel.semana_num }}/{{ periodo_sel.anio }}</div>
+    {% for c in costo_obra %}
+    <div class="obra-row">
+      <span class="nombre">{{ c.obra }}</span>
+      <div class="track"><div class="fill" style="width:{{ c.pct }}%"></div></div>
+      <span class="val">{{ c.costo|money }}</span>
+    </div>
+    {% else %}
+    <p class="text-muted small">Sin datos para estos filtros.</p>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="panel mb-4">
+  <div class="panel-title">Alertas prioritarias</div>
+  <div class="panel-sub">Generadas a partir de condiciones reales del sistema (documentos, nominas y bajadas a casa)</div>
+  <div class="table-responsive">
+    <table class="alert-table">
+      <thead><tr><th>Gravedad</th><th>Alerta</th><th>Responsable</th><th>Desde</th><th>Accion requerida</th></tr></thead>
+      <tbody>
+        {% for a in alertas %}
+        <tr>
+          <td><span class="sev-badge {{ a.severidad }}">{{ 'Critico' if a.severidad=='crit' else 'Atencion' }}</span></td>
+          <td>{{ a.texto }}</td>
+          <td class="text-muted small">{{ a.responsable }}</td>
+          <td class="text-muted small">{{ a.desde }}</td>
+          <td class="text-azul fw-bold small">{{ a.accion }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="text-center text-muted py-3">Sin alertas para estos filtros. Todo en orden.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% endif %}
 {% endblock %}
