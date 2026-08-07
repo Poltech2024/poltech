@@ -29,7 +29,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.environ.get("DB_PATH", os.path.join(APP_DIR, "poltech.db"))
 
-APP_VERSION = "1.33"   # version del sistema (visible en el menu)
+APP_VERSION = "1.34"   # version del sistema (visible en el menu)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-cambia-esta-clave-en-render")
@@ -140,18 +140,32 @@ def asegurar_puesto_asignado(db, empleado_id, puesto_id):
                    (empleado_id, puesto_id))
 
 
+PUESTO_PENDIENTE = "Pendiente de asignar"
+
 def resolver_puesto(db, obra_nom):
     """En la carga masiva, el texto de la columna Puesto ya no se usa para elegir
-    el puesto (queda solo de referencia): siempre se asigna el puesto activo de
-    menor sueldo semanal de la obra indicada, para revisar y ajustar el sueldo
-    de cada quien despues. Devuelve el puesto (id, nombre, sueldo, estado de la
-    obra) o None si la obra no existe o no tiene puestos activos."""
-    return db.execute(
-        "SELECT p.id, p.nombre AS puesto, p.sueldo_semanal, o.estado FROM puestos p "
-        "JOIN obras o ON o.id=p.obra_id "
-        "WHERE lower(o.nombre)=lower(?) AND p.activo=1 "
-        "ORDER BY p.sueldo_semanal ASC LIMIT 1",
+    el puesto (queda solo de referencia): siempre se asigna un puesto placeholder
+    'Pendiente de asignar' (sueldo $0), creandolo si la obra no lo tiene todavia.
+    Asi los recien cargados quedan facil de identificar (sueldo en $0) para
+    reclasificarlos despues con Catalogo de sueldos > Carga masiva de categorias.
+    Devuelve el puesto (id, nombre, sueldo, estado de la obra) o None si la
+    obra no existe."""
+    obra = db.execute(
+        "SELECT id, estado FROM obras WHERE lower(nombre)=lower(?)",
         ((obra_nom or "").strip(),)).fetchone()
+    if not obra:
+        return None
+    p = db.execute(
+        "SELECT id, nombre AS puesto, sueldo_semanal FROM puestos "
+        "WHERE obra_id=? AND nombre=? AND activo=1",
+        (obra["id"], PUESTO_PENDIENTE)).fetchone()
+    if not p:
+        cur = db.execute(
+            "INSERT INTO puestos(obra_id, nombre, sueldo_semanal, viaticos_semanales, activo) "
+            "VALUES(?,?,0,0,1)", (obra["id"], PUESTO_PENDIENTE))
+        p = {"id": cur.lastrowid, "puesto": PUESTO_PENDIENTE, "sueldo_semanal": 0}
+    return {"id": p["id"], "puesto": p["puesto"], "sueldo_semanal": p["sueldo_semanal"],
+            "estado": obra["estado"]}
 
 
 ESTADOS = [
@@ -2980,7 +2994,7 @@ def personal_carga():
                 errs.append(f"fecha de alta '{falta}' no reconocida (usa DD-MM-AAAA)")
             puesto = resolver_puesto(db, obra_nom)
             if not puesto:
-                errs.append(f"la obra '{txt(obra_nom)}' no existe en el catalogo o no tiene puestos activos")
+                errs.append(f"la obra '{txt(obra_nom)}' no existe en el catalogo")
             # NSS duplicado
             if nss and db.execute("SELECT 1 FROM empleados WHERE nss=?", (nss,)).fetchone():
                 errs.append("ya existe un trabajador con ese NSS")

@@ -15,9 +15,11 @@
     <div class="col-md-3"><button class="btn btn-primary w-100">Subir y procesar</button></div>
   </form>
   <div class="form-text mt-2">
-    La <b>obra</b> debe existir en tu catalogo y tener al menos un puesto activo; si no, esa fila se rechaza.
-    La columna <b>Puesto</b> ya no se usa para elegir el puesto: se asigna automaticamente el de <b>menor
-    sueldo</b> de esa obra, y despues revisas/ajustas el sueldo de cada quien (esa columna solo queda de referencia).
+    La <b>obra</b> debe existir en tu catalogo; si no, esa fila se rechaza.
+    La columna <b>Puesto</b> ya no se usa para elegir el puesto: a todos se les asigna el puesto
+    <b>"Pendiente de asignar" (sueldo $0)</b>, para que sea facil ver quien falta por clasificar y
+    asignarle su categoria real despues desde Catalogo de sueldos &gt; Carga masiva de categorias por obra
+    (esa columna solo queda de referencia).
     La <b>cedula</b> se genera automaticamente para cada trabajador nuevo.
     La <b>cuenta bancaria</b> (banco, tipo de cuenta y numero) es obligatoria: si falta o esta
     repetida, esa fila se rechaza.
