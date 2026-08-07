@@ -32,7 +32,7 @@ DB_PATH = os.environ.get("DB_PATH", os.path.join(APP_DIR, "poltech.db"))
 EQUIPO_DOCS_DIR = os.environ.get("EQUIPO_DOCS_DIR", os.path.join(os.path.dirname(DB_PATH), "equipo_docs"))
 os.makedirs(EQUIPO_DOCS_DIR, exist_ok=True)
 
-APP_VERSION = "1.42"   # version del sistema (visible en el menu)
+APP_VERSION = "1.43"   # version del sistema (visible en el menu)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-cambia-esta-clave-en-render")
@@ -5207,6 +5207,33 @@ def nomina():
     return render_template("nomina.html", obras=obras, viernes_default=vdef, recientes=recientes)
 
 
+def _orden_clasificaciones(db):
+    """Diccionario {nombre_clasificacion: posicion}, segun el orden del catalogo
+    (Catalogo de sueldos > Clasificaciones). Lo que no este en la lista va al final."""
+    return {c["nombre"]: i for i, c in enumerate(
+        db.execute("SELECT nombre FROM clasificaciones ORDER BY id").fetchall())}
+
+
+def _ordenar_por_clasificacion(det, orden):
+    """Reordena el detalle de nomina: primero por clasificacion (segun el orden del
+    catalogo), luego por nombre dentro de cada clasificacion."""
+    return sorted(det, key=lambda d: (orden.get(d.get("clasificacion") or "", len(orden)),
+                                      d.get("nombre") or ""))
+
+
+def _agrupar_por_clasificacion(det):
+    """det ya viene ordenado por clasificacion; junta renglones consecutivos de la
+    misma clasificacion en grupos, preservando el orden (no reordena alfabeticamente)."""
+    grupos = []
+    for d in det:
+        k = d.get("clasificacion") or "Sin clasificar"
+        if grupos and grupos[-1]["clasificacion"] == k:
+            grupos[-1]["filas"].append(d)
+        else:
+            grupos.append({"clasificacion": k, "filas": [d]})
+    return grupos
+
+
 def _con_contratado(db, det):
     """Convierte el detalle a dicts y, si el sueldo/viaticos contratado viene en 0
     (nominas calculadas antes de esta funcion), lo toma del catalogo actual del puesto."""
@@ -5239,6 +5266,8 @@ def nomina_resultado(nomina_id):
         abort(403)
     det = _con_contratado(db, db.execute(
         "SELECT * FROM nomina_detalle WHERE nomina_id=? ORDER BY nombre", (nomina_id,)).fetchall())
+    det = _ordenar_por_clasificacion(det, _orden_clasificaciones(db))
+    grupos = _agrupar_por_clasificacion(det)
     tot = {k: sum(_num(d.get(k)) for d in det) for k in
            ("sueldo", "viaticos", "bono", "he_importe", "infonavit", "desc_nomina",
             "desc_otra", "desc_retardos", "extra_pago", "neto")}
@@ -5294,7 +5323,7 @@ def nomina_resultado(nomina_id):
         "ORDER BY e.primer_apellido, e.nombre", (n["obra_id"],)).fetchall()
     faltantes = [e for e in asignados if e["cedula"] not in cedulas_en_nomina]
 
-    return render_template("nomina_resultado.html", n=n, det=det, tot=tot,
+    return render_template("nomina_resultado.html", n=n, det=det, grupos=grupos, tot=tot,
                            bajas=bajas, por_clasif=por_clasif, caja=caja, caja_rows=caja_rows,
                            pct_despacho=pct_despacho, despacho=despacho, total_a_pagar=total_a_pagar,
                            lote_otros_pagos=lote_otros_pagos, faltantes=faltantes)
@@ -5382,6 +5411,7 @@ def nomina_excel(nomina_id):
         abort(403)
     det = _con_contratado(db, db.execute(
         "SELECT * FROM nomina_detalle WHERE nomina_id=? ORDER BY nombre", (nomina_id,)).fetchall())
+    det = _ordenar_por_clasificacion(det, _orden_clasificaciones(db))
     # datos bancarios por empleado (para el pago)
     cuentas = {}
     ids = [d["empleado_id"] for d in det if d["empleado_id"]]
@@ -5418,20 +5448,29 @@ def nomina_excel(nomina_id):
         c.fill = PatternFill("solid", fgColor=NAVY)
         c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
     r = HROW + 1
-    for idx, d in enumerate(det, start=1):
-        cta = cuentas.get(d["empleado_id"])
-        tipo_cta = cta["tipo_cuenta"] if cta else ""
-        banco_cta = cta["institucion"] if cta else ""
-        num_cta = str(cta["numero"]) if cta and cta["numero"] is not None else ""
-        ws.append([idx, d["cedula"], d["nombre"], d["dias"], d["faltas"], d["retardos"],
-                   d["vacaciones"], d["sueldo"], d["viaticos"], d["he_horas"], d["he_importe"],
-                   d["infonavit"], d["desc_nomina"], d["desc_otra"], d["desc_retardos"],
-                   d["neto"], d["baja_fecha"] or "", tipo_cta, banco_cta, num_cta,
-                   d["clasificacion"] or "Sin clasificar",
-                   _num(d["sueldo_contratado"]), _num(d["viaticos_contratado"]), d["nota"] or "",
-                   _num(d["bono"]), _num(d.get("extra_pago")), d.get("extra_motivo") or ""])
-        ws.cell(r, 20).number_format = "@"   # No. de cuenta como texto
+    idx = 1
+    for g in _agrupar_por_clasificacion(det):
+        ws.cell(r, 1, g["clasificacion"].upper())
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=len(cab))
+        hc = ws.cell(r, 1)
+        hc.font = Font(name="Arial", bold=True, size=10, color="FFFFFF")
+        hc.fill = PatternFill("solid", fgColor="4A5568")
         r += 1
+        for d in g["filas"]:
+            cta = cuentas.get(d["empleado_id"])
+            tipo_cta = cta["tipo_cuenta"] if cta else ""
+            banco_cta = cta["institucion"] if cta else ""
+            num_cta = str(cta["numero"]) if cta and cta["numero"] is not None else ""
+            ws.append([idx, d["cedula"], d["nombre"], d["dias"], d["faltas"], d["retardos"],
+                       d["vacaciones"], d["sueldo"], d["viaticos"], d["he_horas"], d["he_importe"],
+                       d["infonavit"], d["desc_nomina"], d["desc_otra"], d["desc_retardos"],
+                       d["neto"], d["baja_fecha"] or "", tipo_cta, banco_cta, num_cta,
+                       d["clasificacion"] or "Sin clasificar",
+                       _num(d["sueldo_contratado"]), _num(d["viaticos_contratado"]), d["nota"] or "",
+                       _num(d["bono"]), _num(d.get("extra_pago")), d.get("extra_motivo") or ""])
+            ws.cell(r, 20).number_format = "@"   # No. de cuenta como texto
+            r += 1
+            idx += 1
     # totales generales (por nombre de columna, para que no se desalineen si cambia el orden)
     ws.append([])
     fila_tot = [""] * len(cab)

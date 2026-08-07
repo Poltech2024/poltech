@@ -107,7 +107,11 @@
         </tr>
       </thead>
       <tbody>
-        {% for d in det %}
+        {% for g in grupos %}
+        <tr class="table-secondary">
+          <td colspan="18" class="fw-bold text-navy">{{ g.clasificacion }} <span class="fw-normal text-muted">({{ g.filas|length }})</span></td>
+        </tr>
+        {% for d in g.filas %}
         <tr class="{% if d.baja_fecha %}table-warning{% endif %}">
           <td><b>{{ d.nombre }}</b> <span class="text-muted small">{{ d.cedula }}</span></td>
           <td class="text-end text-muted">{{ d.sueldo_contratado|money }}</td>
@@ -128,6 +132,7 @@
           <td class="text-end">{{ d.desc_retardos|money }}</td>
           <td class="text-end fw-bold text-navy">{{ d.neto|money }}</td>
         </tr>
+        {% endfor %}
         {% endfor %}
       </tbody>
       <tfoot>
